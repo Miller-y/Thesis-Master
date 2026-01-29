@@ -1,0 +1,16 @@
+figures/
+data/*.aux
+*.aux
+*.toc
+*.log
+*.out
+*.gz
+*.blg
+*.bbl
+main.thm
+shuthesis.cfg
+shuthesis.cls
+shuthesis.dtx
+shuthesis.ins
+shuthesis.pdf
+shuthesis.sty

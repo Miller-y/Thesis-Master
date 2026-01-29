@@ -1,0 +1,300 @@
+% !Mode:: "TeX:UTF-8"
+\chapter{线阵相机三维定位的成像模型与几何基础}
+\label{chap:principle}
+
+\section{引言}
+
+为获取室内点光源的高精度三维位置信息，并为后续基于CSI的深度学习模型训练提供可靠的坐标真值（Ground Truth），本研究设计并实现了一套包含Y型光学定位传感器（LOPS）、点光源同步控制系统及上位机解算软件的光学定位系统。如图\ref{fig:yops_system}所示，LOPS主体由三个线阵CCD构成，三者呈“Y”字形共面排布，相邻CCD之间的夹角固定为$120^{\circ}$。系统选用波长850~nm的红外LED作为被测点光源，并通过控制系统实现光源脉冲与LOPS曝光时序的微秒级同步。通过提取点光源在三个线阵CCD上的成像位置，结合系统几何模型与空间交会原理，即可重构出目标的精确三维坐标。
+
+% --- 插入图2.1 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/Y型光学定位传感器（LOPS）系统结构示意图.pdf} 
+    % \fbox{\parbox[c][4cm]{0.8\textwidth}{\centering 请替换为LOPS系统结构图 (figures/yops\_structure.pdf)}} % 占位符
+    \caption{Y型光学定位传感器（LOPS）系统结构示意图}
+    \label{fig:yops_system} % 对应文中的 \ref{fig:yops_system}
+\end{figure}
+
+
+本章将首先阐述线阵相机的成像机理及光斑中心亚像素定位算法；随后定义系统所涉及的坐标系、介绍不同坐标系的变换关系以及推导正向成像模型；最后详细论述基于多线阵CCD的空间点定位原理，旨在为后续的系统参数标定提供必要的理论支撑。
+
+\section{线阵相机成像原理}
+
+\subsection{柱面镜头组成像模型}
+
+本文所用线阵相机由柱面镜头和线阵CCD组成。和普通相机镜头组一样，该线阵相机的成像镜头也是由多组不同的镜片组成。图\ref{fig:cylindrical_lens_layout}展示了线阵相机所用柱面透镜的光学布局，该镜头组由光学设计软件ZEMAX设计。在$YZ$视图内，整个视场内的所有光线均被压缩成与线阵CCD成像单元所在直线正交的一条短线，光线$Y$方向上入射角度的变化不会导致图像上对应的像点位置变化。在$XZ$视图中，平行光线被聚焦为在CCD上的一点，$X$方向上入射角不同的光线被折射到不同像点。
+
+% --- 插入图2.2 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/chap02/柱面镜头组原理图.pdf}
+    %\fbox{\parbox[c][4cm]{0.8\textwidth}{\centering 请替换为柱面透镜光学布局图 (figures/lens\_zemax.pdf)}} % 占位符
+    \caption{基于ZEMAX设计的柱面透镜光学布局（含YZ与XZ视图）}
+    \label{fig:cylindrical_lens_layout} % 对应文中的 \ref{fig:cylindrical_lens_layout}
+\end{figure}
+
+
+根据柱面镜头成像特点，可将其成像模型简化为一维小孔成型模型，如图\ref{fig:1d_pinhole_model}所示。图中用一个柱面镜表示实际的柱面镜头组，线阵CCD垂直于柱面镜头的轴心线。另外，为了降低环境光线的干扰，增加定位系统的鲁棒性，柱面镜头添加了850~nm的窄带滤光片。
+
+% --- 插入图2.3 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/一维小孔成像模型.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为一维小孔成像模型图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{线阵相机的一维小孔成像简化模型}
+    \label{fig:1d_pinhole_model} % 对应文中的 \ref{fig:1d_pinhole_model}
+\end{figure}
+
+
+此时，点光源形成的线状像与线阵CCD的光敏阵列垂直相交，该交点即为点光源在传感器上的有效像点。由此可知，线阵相机的像点和柱面镜的轴心线确定了一个平面，该像点对应的标记点在这一平面内。在实际应用中，由于加工工艺和装备工艺等原因，实际的成像模型并非小孔成像模型，实际像点和理想像点之间存在一定偏差，即畸变。为了提高测量精度，需要使用合适的镜头畸变模型和标定算法来修正相机的像点位置，具体去畸变方法见第三章。
+\subsection{光斑中心定位算法}
+
+理想光学成像系统可以将标记点发出的光线聚焦在线阵CCD上的一个感光单元上，如图\ref{fig:dream_light_spot_model}所示。
+% --- 插入图2.4 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/理想光斑信号模型.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为理想光斑信号模型图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{理想光斑信号模型}
+    \label{fig:dream_light_spot_model} % 对应文中的 \ref{fig:dream_light_spot_model}
+\end{figure}
+
+但在实际应用中，标记点发出的光线经柱面镜头组折射后在CCD上的成像往往是一个光斑，如图\ref{fig:real_light_spot_model}所示，线阵CCD像素上的光强越 大，对应灰度值越大。想要提高测量精度必须使用亚像素定位细分算法对光斑进行处理，提高光斑中心定位的分辨率。
+
+% --- 插入图2.5 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/实际光斑信号.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为实际光斑信号图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{实际光斑信号}
+    \label{fig:real_light_spot_model} % 对应文中的 \ref{fig:real_light_spot_model}
+\end{figure}
+
+亚像素定位细分算法的核心在于从像素阵列中精确提取光斑的几何中心。常见的算法包括灰度质心法与平方加权质心法。灰度质心法假定光斑能量分布与像素灰度呈线性关系，计算简单但抗噪能力有限；平方加权质心法通过对灰度值进行平方加权，提升了高信噪比区域（光斑中心）的权重，增强了鲁棒性，但受限于物理像素分辨率，其精度提升存在瓶颈。
+
+为平衡嵌入式系统的计算效率与亚像素精度，本文在对比上述方法的基础上，选用线性插值质心法[94]。该方法首先通过线性插值在有效像素区间内重构亚像素级灰度分布，再利用平方加权法计算质心，能够在有限的计算资源下有效改善量化误差。
+
+根据线性插值理论，假设插值点 $m_i$ 位于 $u_i$ 和 $u_{i+1}$ 之间，则该插值点对应的灰度值为：
+\begin{equation}
+p(m_i) = (u_{i+1} - m_i) p_i + (m_i - u_i) p_{i+1}
+\label{eq:2.3}
+\end{equation}
+其中 $p(\cdot)$ 为计算插值点灰度值的函数。经过插值后，光斑质心位置的计算公式为：
+\begin{equation}
+\hat{u} = \frac{\sum_{i=1}^{N} p_i^2 u_i + \sum_{i=1}^{N-1} p(m_i)^2 m_i}{\sum_{i=1}^{N} p_i^2 + \sum_{i=1}^{N-1} p(m_i)^2}
+\label{eq:2.4}
+\end{equation}
+
+本文选择该方法的原因在于其在保证亚像素精度的同时，计算复杂度较低，适合在 STM32 等嵌入式平台上实时实现，为后续多传感器协同提供稳定的视觉观测输入。
+为方便表述，下文中标记点对应 的像点均表示经过亚像素细分定位算法处理后得到的光斑中心。
+
+
+
+\section{坐标系的建立}
+\label{sec:coordinate_systems}
+
+线阵相机成像与三维空间定位的本质，是建立从一维离散像素阵列到三维连续物理空间的数学映射。为清晰描述这一几何过程，并实现多传感器数据的空间对齐，本研究建立了五个层次的坐标系，形成了一条完整的坐标变换链。各坐标系的定义及其符号约定如下：
+
+\begin{itemize}
+    \item \textbf{像素坐标系} $P$ ($O_P - u$)：描述传感器原始离散采样数据；
+    \item \textbf{图像坐标系} $I$ ($O_I - x$)：描述成像平面的物理几何尺寸；
+    \item \textbf{相机坐标系} $C$ ($O_C - XYZ$)：描述透视投影几何关系；
+    \item \textbf{传感器坐标系} $S$ ($O_S - XYZ$)：描述LOPS系统的整体机体姿态；
+    \item \textbf{世界坐标系} $W$ ($O_W - XYZ$)：描述绝对空间位置的惯性基准。
+\end{itemize}
+
+\subsection{像素坐标系 (Pixel Coordinate System)}
+\label{subsec:pixel_coords}
+
+像素坐标系 $P$ 是线阵CCD获取原始图像数据的最底层参考系。
+如图 \ref{fig:P_coordinate_systems} 所示，该坐标系原点 $O_P$ 位于线阵CCD感光阵列的首个有效感光单元，$u$ 轴正方向沿感光单元排列方向延伸。
+像素坐标系的主要作用是提供图像采样的索引位置，其单位为像素（pixel）。数值 $u$ 直接反映了像点在数字图像中的离散地址，是后续物理量化计算的基础。
+
+\begin{figure}[htbp]
+    \centering
+    % 注意：保持了您原有的图片路径
+    \includegraphics[width=0.4\textwidth]{figures/chap02/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{像素坐标系示意图}
+    \label{fig:P_coordinate_systems}
+\end{figure}
+
+\subsection{图像坐标系 (Image Coordinate System)}
+\label{subsec:image_coords}
+
+图像坐标系 $I$ 旨在将离散的像素索引转化为具有实际物理尺寸（毫米级）的几何描述。
+如图 \ref{fig:I_coordinate_systems} 所示，其 $x$ 轴与像素坐标系 $u$ 轴共线。原点 $O_I$ 定义为\textbf{像主点}，即柱面镜头光轴与线阵CCD感光平面的几何交点。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.4\textwidth]{figures/chap02/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{图像坐标系与像素坐标系的对应关系}
+    \label{fig:I_coordinate_systems}
+\end{figure}
+
+设像点在图像坐标系中的坐标为 $x$ (mm)，在像素坐标系中的坐标为 $u$ (pixel)，两者通过以下线性关系关联：
+\begin{equation}
+    u = \frac{x}{\mathrm{d}x} + u_0 \label{eq:pixel_affine}
+\end{equation}
+其中，$\mathrm{d}x$ 表示单个感光单元的物理宽度 (mm/pixel)，$u_0$ 表示像主点在像素坐标系下的偏置坐标。
+值得注意的是，在理想光学系统中 $u_0$ 应位于CCD几何中心，但受镜头装配误差及光学畸变影响，实际系统中 $u_0$ 通常存在非零偏差，需作为内参进行标定修正。
+
+\subsection{线阵相机坐标系 (Camera Coordinate System)}
+\label{subsec:camera_coords}
+
+相机坐标系 $C$ 是描述透视投影几何关系的核心参考系。
+其原点 $O_C$ 位于镜头组的光学中心，$Z_C$ 轴沿镜头光轴指向物体方向，$X_C$ 轴与图像坐标系 $x$ 轴平行，$Y_C$ 轴方向由右手定则确定。
+根据线阵相机的一维小孔成像模型（柱面镜模型），空间点 ${}^C \bm{M} = [X_C \quad Y_C \quad Z_C]^T$ 与其图像物理坐标 $x_I$ 满足相似三角形关系：
+\begin{equation}
+    \frac{x_I}{f_m} = \frac{X_C}{Z_C} \label{eq:pinhole_model}
+\end{equation}
+其中 $f_m$ 表示线阵相机的物理焦距 (mm)。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.4\textwidth]{figures/chap02/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{相机坐标系、图像坐标系与像素坐标系的投影几何关系}
+    \label{fig:camera_projection}
+\end{figure}
+
+如图 \ref{fig:camera_projection} 所示，联立公式 (\ref{eq:pixel_affine}) 与 (\ref{eq:pinhole_model})，并引入齐次坐标形式，可推导出从相机空间到像素空间的投影方程：
+\begin{equation}
+    Z_C \begin{bmatrix} u \\ 1 \end{bmatrix} = 
+    \begin{bmatrix} 
+    f & 0 & u_0 \\
+    0 & 0 & 1 
+    \end{bmatrix}
+    \begin{bmatrix} X_C \\ Y_C \\ Z_C \end{bmatrix} \label{eq:intrinsic_matrix}
+\end{equation}
+式中，$f = f_m / \mathrm{d}x$ 为以像素为单位的等效焦距。该矩阵即为线阵相机的\textbf{内参矩阵}，它囊括了焦距与主点偏移等固有属性。
+
+\subsection{传感器坐标系 (Sensor Coordinate System)}
+\label{subsec:sensor_coords}
+
+由于LOPS系统采用三个线阵相机呈Y型共面布局，为统一各相机的观测数据，需建立传感器坐标系 $S$ 描述整个传感器的机体姿态。
+原点 $O_S$ 设定于传感器的几何中心（即Y型结构的中心点）。
+
+由于各线阵相机被机械固定在传感器底板上，相机坐标系 $C$ 与传感器坐标系 $S$ 之间存在固定的刚体变换关系。对于任一空间点 $\bm{M}$，其在两坐标系下的描述满足：
+\begin{equation}
+    {}^C \bm{M} = {}^C_S \bm{R} \, {}^S \bm{M} + {}^C_S \bm{t} \label{eq:extrinsic_struct}
+\end{equation}
+其中，${}^C_S \bm{R}$ 和 ${}^C_S \bm{t}$ 分别表示传感器中心到各相机光心的旋转矩阵和平移向量。这些参数属于系统的\textbf{结构外参}，在传感器制造完成后即保持恒定。
+
+\subsection{世界坐标系 (World Coordinate System)}
+\label{subsec:world_coords}
+
+世界坐标系 $W$（或惯性坐标系）是系统进行绝对定位的基准参考系。
+在实际应用中，通常选取实验场地中的固定点或高精度测量设备的坐标系作为世界坐标系。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/坐标系S和世界坐标系W之间的关系.pdf}
+    \caption{传感器坐标系与世界坐标系的位姿变换关系}
+    \label{fig:world_transform}
+\end{figure}
+
+如图 \ref{fig:world_transform} 所示，当LOPS传感器在空间中运动时，传感器坐标系 $S$ 相对于世界坐标系 $W$ 的关系是实时变化的。若已知标记点在世界系下的绝对坐标 ${}^W \bm{M}$，则其在相机系下的坐标可表示为：
+\begin{equation}
+    {}^C \bm{M} = {}^C_W \bm{R} \, {}^W \bm{M} + {}^C_W \bm{t} \label{eq:world_transform}
+\end{equation}
+
+
+
+
+\section{基于多线阵CCD的空间点定位原理}
+\label{sec:positioning_principle}
+
+本节旨在建立从多传感器观测数据到三维空间坐标的数学解算模型。首先推导单线阵相机的通用投影模型，明确其内参数与结构外参的耦合关系；随后基于“光平面交会”的几何原理，论证多相机协同定位的必要性，并推导三维坐标的最小二乘解算方法。
+
+\subsection{线阵相机投影模型与参数约束}
+\label{subsec:projection_model}
+
+根据前文 \ref{sec:coordinate_systems} 节定义的坐标变换链，设传感器坐标系 $S$ 中存在一标记点，其坐标为 ${}^S \bm{M} = [X_S \quad Y_S \quad Z_S]^T$。我们的目标是建立该三维坐标与像素坐标系 $P$ 中观测值 $u$ 之间的直接映射函数。
+
+根据成像几何关系，点 ${}^S \bm{M}$ 首先需经由刚体变换映射至相机坐标系 $C$（公式 \ref{eq:extrinsic_struct}），随即通过透视投影离散化为像素坐标（公式 \ref{eq:intrinsic_matrix}）。引入尺度因子 $s$（物理意义为点在相机坐标系下的深度 $Z_C$），联立上述变换过程，可得：
+
+\begin{equation}
+    s \begin{bmatrix} u \\ 1 \end{bmatrix} = 
+    \underbrace{ \begin{bmatrix} f & 0 & u_0 \\ 0 & 0 & 1 \end{bmatrix} }_{\text{内参矩阵}}
+    \underbrace{ \begin{bmatrix} {}^C_S \bm{R} & {}^C_S \bm{t} \end{bmatrix} }_{\text{结构外参矩阵}}
+    \begin{bmatrix} {}^S \bm{M} \\ 1 \end{bmatrix}
+    \label{eq:combined_mapping}
+\end{equation}
+
+由于内参矩阵与结构外参矩阵均为常数矩阵，可将其乘积合并为一个 $2 \times 4$ 的映射矩阵。整理公式 (\ref{eq:combined_mapping}) 可得基于传感器坐标系的通用投影模型：
+
+\begin{equation}
+    s \begin{bmatrix} u \\ 1 \end{bmatrix} = \bm{L} \begin{bmatrix} {}^S \bm{M} \\ 1 \end{bmatrix} = 
+    \begin{bmatrix} l_1 & l_2 & l_3 & l_4 \\ l_5 & l_6 & l_7 & 1 \end{bmatrix}
+    \begin{bmatrix} X_S \\ Y_S \\ Z_S \\ 1 \end{bmatrix}
+    \label{eq:projection_matrix_def}
+\end{equation}
+
+其中，$\bm{L}$ 定义为线阵相机的\textbf{全局投影矩阵}（Projection Matrix）。
+
+\textbf{参数约束分析：}
+由公式 (\ref{eq:projection_matrix_def}) 可知，投影矩阵 $\bm{L}$ 将相机的内部光学特性（焦距 $f$、主点 $u_0$）与系统级的机械结构参数（旋转 ${}^C_S \bm{R}$、平移 ${}^C_S \bm{t}$）进行了耦合。
+在LOPS系统中，各线阵相机相对于传感器基座的安装位置是刚性固定的，即坐标系变换关系恒定。因此，对于系统中的每一个相机通道，矩阵 $\bm{L}$ 中的 7个元素 ($l_1 \sim l_7$) 均为系统固有常数。
+这7个参数完备地描述了该相机在传感器体系下的空间观测特性。第三章将详细阐述如何通过标定实验解算这些参数。
+
+\subsection{多线阵空间交会定位原理}
+\label{subsec:intersection_principle}
+
+\subsubsection{光平面几何约束}
+与面阵相机将空间点投影为一条射线不同，线阵相机的一维观测特性在几何上具有特殊的降维性质。将公式 (\ref{eq:projection_matrix_def}) 展开并消去尺度因子 $s$（即 $s = l_5 X_S + l_6 Y_S + l_7 Z_S + 1$），可得：
+\begin{equation}
+    u (l_5 X_S + l_6 Y_S + l_7 Z_S + 1) = l_1 X_S + l_2 Y_S + l_3 Z_S + l_4
+\end{equation}
+整理同类项，得到关于空间坐标 $(X_S, Y_S, Z_S)$ 的线性方程：
+\begin{equation}
+    (l_1 - u l_5) X_S + (l_2 - u l_6) Y_S + (l_3 - u l_7) Z_S + (l_4 - u) = 0
+    \label{eq:light_plane_equation}
+\end{equation}
+公式 (\ref{eq:light_plane_equation}) 的几何意义十分明确：它描述了一个通过相机光心与成像直线的平面，本文称之为\textbf{“光平面” (Light Plane)} 。这意味着，单台线阵相机的观测值 $u$ 仅能约束目标点位于该特定的光平面上，而无法确定其具体深度。
+
+\subsubsection{多平面交会与自由度分析}
+为了唯一确定空间点的三维坐标（3个自由度），必须引入足够的几何约束。
+\begin{itemize}
+    \item \textbf{双相机观测：} 若引入第二个线阵相机，目标点将被约束在两个光平面的交线上（假设两相机光轴不共面）。此时系统仍存在1个自由度冗余，仅能测向，无法测距。
+    \item \textbf{三相机观测：} 根据立体几何原理，三个互不平行的平面的交集（在非奇异构型下）为一个点。因此，至少需要三个非共轴线阵相机的协同观测，通过三个光平面的交汇，方可实现精确的三维定位。
+\end{itemize}
+
+\subsubsection{Y型构型优势与解算}
+图 \ref{fig:tradition_Mulit_CCD} 展示了现有的两种典型多线阵布局：正交立体结构（文献[47]）和分布式测量网络（文献[49]）。正交结构虽然数学模型简单，但往往导致传感器体积庞大；分布式布局虽然灵活，但需要复杂的多节点外参标定，且依赖特定的场景部署。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/传统线阵CCD布局.pdf}
+    \caption{传统线阵CCD布局形式：(a) 正交立体结构；(b) 分布式测量网络}
+    \label{fig:tradition_Mulit_CCD}
+\end{figure}
+
+针对上述局限，本文提出了图 \ref{fig:Y_Mulit_CCD} 所示的紧凑型 Y 型共面结构。该构型在同一平面内集成三个互成 $120^\circ$ 夹角的线阵相机，既保证了三个光平面在空间中具备良好的交会角（Geometric Dilution of Precision, GDOP），又显著降低了传感器体积，实现了便携性与测量稳定性的平衡。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap02/Y型定位传感器模型.pdf}
+    \caption{本文提出的Y型定位传感器光平面交会原理}
+    \label{fig:Y_Mulit_CCD}
+\end{figure}
+
+当系统的三个相机 ($i=1, 2, 3$) 同时观测到同一目标时，基于公式 (\ref{eq:light_plane_equation}) 可构建如下线性方程组：
+\begin{equation}
+    \begin{cases}
+        (l_{1,1} - u_1 l_{1,5}) X_S + (l_{1,2} - u_1 l_{1,6}) Y_S + (l_{1,3} - u_1 l_{1,7}) Z_S = u_1 - l_{1,4} \\
+        (l_{2,1} - u_2 l_{2,5}) X_S + (l_{2,2} - u_2 l_{2,6}) Y_S + (l_{2,3} - u_2 l_{2,7}) Z_S = u_2 - l_{2,4} \\
+        (l_{3,1} - u_3 l_{3,5}) X_S + (l_{3,2} - u_3 l_{3,6}) Y_S + (l_{3,3} - u_3 l_{3,7}) Z_S = u_3 - l_{3,4}
+    \end{cases}
+\end{equation}
+写成矩阵形式为：
+\begin{equation}
+    \bm{A} {}^S \bm{M} = \bm{b}
+    \label{eq:linear_system}
+\end{equation}
+其中系数矩阵 $\bm{A} \in \mathbb{R}^{3 \times 3}$ 和常数向量 $\bm{b} \in \mathbb{R}^{3 \times 1}$ 由各相机的投影参数 $l_{i,j}$ 及其实时观测值 $u_i$ 构造。
+若 $\bm{A}$ 满秩（即三个光平面不共线），则通过 $\bm{M} = \bm{A}^{-1} \bm{b}$ 即可解算出目标在传感器坐标系下的精确三维坐标。在实际工程中，常采用最小二乘法或奇异值分解（SVD）求解以提高数值稳定性。
+
+
+
+
+\section{本章小结}
+本章首先阐述了线阵相机的成像机理及光斑中心亚像素定位算法，随后定义了系统涉及的各类坐标系。在此基础上，重点推导了基于投影矩阵 $\bm{L}$ 的正向成像模型，明确了投影矩阵中7个固定参数的物理意义，并分析了基于多光平面交会的空间定位原理。这为后续章节开展系统参数标定与高精度定位实验奠定了坚实的理论基础。

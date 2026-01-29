@@ -1,0 +1,394 @@
+% !Mode:: "TeX:UTF-8"
+\chapter{线阵视觉系统的几何畸变校正与高鲁棒性标定方法实现}
+\label{chap:calibration}
+
+\section{引言}
+
+基于视觉的三维测量技术通常建立在理想的几何光学模型之上。然而，在实际的物理成像系统中，由于制造工艺与装配精度的限制，镜头焦距的一致性、相机在空间中的绝对位姿、以及传感器与光学中心的耦合关系等，都不可避免地存在偏差。这些物理参数的非理想特性是引入测量误差的主要来源。因此，为了实现高精度的空间目标检测，必须对系统进行严格的标定与校准。
+
+\subsection{现有技术现状与局限}
+
+在相机标定领域，针对面阵相机的研究已相当成熟，学术界和工业界发展出了多种经典算法。相比之下，针对线阵相机的标定技术研究相对匮乏。尽管文献中提出了适用于线阵模型的“7系数DLT方法”，为该领域提供了一定的理论基础，但在面对复杂光学系统时，其适用性仍面临挑战。
+
+在本系统所采用的硬件架构中，为了满足特定的视场覆盖需求，引入了组合柱面透镜系统。实际测试表明，该光学结构引入了显著的非线性几何畸变，特别是在偏离光轴较大的边缘视场区域。若直接套用传统的线性模型，忽略镜头畸变带来的非线性误差，将导致标定结果偏离真实值。因此，如何有效地分离并校正这种特殊的镜头畸变，并克服远距离观测下的噪声干扰，成为本系统标定的关键难点。
+
+\subsection{分阶段标定策略}
+
+针对上述复杂光学系统带来的非线性畸变与远场观测噪声分布不均等挑战，若直接采用整体优化方法求解，极易陷入局部最优。为此，本文提出一种“先校正、后解算”的分阶段解耦标定策略，将复杂的标定问题分解为两个相对独立的子问题进行处理：
+
+\paragraph{第一阶段：非线性几何畸变校正}
+该阶段旨在剥离柱面透镜组引入的非线性误差。本文利用 ZEMAX 光学仿真软件生成高精度的栅格畸变数据，从而获取空间中点光源的“真实成像位置”与“理想成像位置”之间的偏差信息。 基于这些仿真数据，在 MATLAB 中建立高阶多项式畸变修正模型，并计算相应的畸变修正系数。此步骤的核心在于构建从“畸变图像坐标系”到“理想图像坐标系”的映射关系，从而消除光学系统非线性特性的影响。
+
+\paragraph{第二阶段：线性参数鲁棒解算}
+在完成畸变校正后，后续的参数估计可被视为线性模型下的估计问题。首先利用第一阶段获取的校正系数对所有标志点的原始信号进行预处理，将其恢复为符合针孔/线阵成像模型的理想坐标。随后，针对远距离观测中存在的噪声异方差问题，引入加权估计策略（详见后文 2.3 节），精确解算出系统的线性结构系数及相机的内外部参数。通过这种分步策略，有效规避了非线性畸变与几何投影参数之间的强耦合，显著提升了标定结果的数值稳定性与精度。
+
+\section{柱面镜头的畸变与去畸变}
+\subsection{畸变模型}
+本文所用柱面镜头组由光学设计软件 ZEMAX 设计，通过 ZEMAX 仿真，可以得到柱面镜头组理论上的畸变结果。ZEMAX 生成的栅格畸变数据包括空间中不同位置的点光源对应的真实成像位置 $\tilde{x}$ 和理想成像位置 $x$，单位为 mm，位于图像坐标系。如图\ref{fig:distortion_with_𝛼_𝛽}所示，畸变为真实位置和理想位置的差，$\alpha$ 表示点光源和相机坐标系 $Y$ 轴所在平面与相机坐标系 $Z$ 轴的夹角，$\beta$ 表示点光源和相机坐标系 $X$ 轴所在平面与相机坐标系 $Z$ 轴的夹角，$\alpha$ 和 $\beta$ 的范围为 $[-20.8^\circ, 20.8^\circ]$。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap03/畸变和alpha_beta之间的关系.pdf}
+    \caption{畸变和𝛼、𝛽之间的关系}
+    \label{fig:distortion_with_𝛼_𝛽} % 对应文中的 \ref{fig:distortion_with_𝛼_𝛽}
+\end{figure}
+
+假设空间中的点光源在相机坐标系下的坐标为 $^C \boldsymbol{M} = [X_C \quad Y_C \quad Z_C]^T$，定义归一化平面 $[x_n \quad y_n \quad 1]^T$，其中：
+\begin{equation}
+x_n = X_C / Z_C = \tan \alpha \tag{3.1}
+\end{equation}
+\begin{equation}
+y_n = Y_C / Z_C = \tan \beta \tag{3.2}
+\end{equation}
+
+将镜头的相对畸变 $\Delta$ 表示为 $x_n$ 和 $y_n$ 的函数，定义如下：
+\begin{equation}
+\Delta = 
+\begin{cases} 
+\frac{\tilde{x} - x}{x} = \frac{\tilde{x}_n - x_n}{x_n} = h(x_n, y_n), & x_n \neq 0 \\
+0, & x_n = 0
+\end{cases} \tag{3.3}
+\end{equation}
+
+其中带有上标变量 $(\tilde{\cdot})$ 表示存在畸变的真实值，无上标变量表示理想值，$h(\cdot)$ 表示关于 $x_n$ 和 $y_n$ 的函数。根据 $\Delta$ 和 $x_n$、$y_n$ 之间的关系可以得到新的曲面，如图\ref{fig:distortion_with_𝑥𝑛_𝑦𝑛}所示。
+
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap03/相对畸变和xn_yn之间的关系.pdf}
+    \caption{相对畸变和𝑥𝑛、𝑦𝑛之间的关系}
+    \label{fig:distortion_with_𝑥𝑛_𝑦𝑛} % 对应文中的 \ref{fig:distortion_with_𝑥𝑛_𝑦𝑛}
+\end{figure}
+
+
+本文利用 MATLAB 中的曲线拟合工具箱，使用多项式对图中曲面进行拟合，结果显示将 $h(x_n, y_n)$ 表示为四阶多项式的形式可以较好地拟合曲面，同时奇数次幂的系数可以忽略不计。因此可以将 $h(x_n, y_n)$ 定义如下：
+\begin{equation}
+h(x_n, y_n) = p_1 x_n^2 + p_2 y_n^2 + p_3 x_n^2 y_n^2 + p_4 x_n^4 + p_5 y_n^4 \tag{3.4}
+\end{equation}
+
+根据公式 (3.3) 可得 $\tilde{x}_n$ 和 $x_n$ 之间的关系为：
+\begin{equation}
+\tilde{x}_n = x_n (1 + h(x_n, y_n)) \tag{3.5}
+\end{equation}
+
+其中 $\tilde{x}_n$ 的值可由公式 (3.3) 计算得到。使用 MATLAB 中 \texttt{lsqcurvefit} 函数进一步拟合公式 (3.5)，各个系数的拟合结果如表 3.1 所示，其中均方根误差（Root Mean Square Error, RMSE）为 $0.0052 \mu\text{m}$。
+
+\begin{table}[h]
+\centering
+\caption{表 3.1 $h(x_n, y_n)$ 各项系数拟合结果}
+\begin{tabular}{cccccc}
+\hline
+$p_1$ & $p_2$ & $p_3$ & $p_4$ & $p_5$ & RMSE/$\mu\text{m}$ \\ \hline
+-0.1134 & -0.0258 & 0.2047 & 0.1727 & 0.0189 & 0.0052 \\ \hline
+\end{tabular}
+\end{table}
+
+结合公式 (3.1) 和 (3.5)，可得该柱面镜头组的畸变模型为：
+\begin{equation}
+\tilde{u} = f (1 + h(x_n, y_n)) x_n + u_0, \quad x_n = \frac{u - u_0}{f} \tag{3.6}
+\end{equation}
+
+然而，由公式 (2.32) 可知，$y_n$ 无法被线阵相机观测，因此需要将模型简化。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap03/不同alpha的情况下beta变化导致的畸变变化.pdf}
+    \caption{不同𝛼的情况下𝛽变化导致的畸变变化}
+    \label{fig:𝛽_with_𝛼_change} % 对应文中的 \ref{fig:𝛽_with_𝛼_change}
+\end{figure}
+
+图\ref{fig:𝛽_with_𝛼_change}展示了在不同 $\alpha$ 的情况下，仅 $\beta$ 变化导致的畸变变化。图\ref{fig:max_𝛽_with_𝛼_change}中横坐标表示不同的 $\alpha$，纵坐标表示在当前 $\alpha$ 保持不变的情况下，$\beta$ 变化导致的像点最大偏移。由图 3.4 可知，当 $\alpha$ 在 $\pm 10.8^\circ$ 左右时，$\beta$ 变化导致的最大偏移达到最大值。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap03/beta变化导致的像点最大偏移.pdf}
+    \caption{𝛽变化导致的像点最大偏移}
+    \label{fig:max_𝛽_with_𝛼_change} % 对应文中的 \ref{fig:max_𝛽_with_𝛼_change}
+\end{figure}
+
+
+当 $\|\beta\| \leq 20.8^\circ$ 时，最大值为 $17.9 \mu\text{m}$，当 $\|\beta\| \leq 15^\circ$ 时，最大值为 $8.42 \mu\text{m}$。又因为本文所用线阵 CCD 的像素单元长度为 $8 \mu\text{m}$，$\beta$ 变化导致的像点偏移在大多数情况下不超过 1 个像素点，所以可假设 $\beta$ 变化产生的畸变对于测量精度影响不大。
+
+将 $h(x_n, y_n)$ 重新定义为只和 $x_n$ 相关的多项式函数，则 $\tilde{x}_n$ 和 $x_n$ 之间的关系可表示为：
+\begin{equation}
+\tilde{x}_n = x_n (1 + h(x_n)) \tag{3.7}
+\end{equation}
+
+利用 MATLAB 中 \texttt{lsqcurvefit} 函数，使用四阶多项式对公式 (3.7) 拟合，$h(x_n)$ 的拟合结果如下：
+\begin{equation}
+h(x_n) = \frac{\tilde{x}_n - x_n}{x_n} = p_1 x_n^2 + p_2 x_n^4 \tag{3.8}
+\end{equation}
+
+其中各个系数如表 3.2 所示，拟合结果的 RMSE 为 $0.1287 \mu\text{m}$。
+
+\begin{table}[h]
+\centering
+\caption{表 3.2 $h(x_n)$ 各项系数拟合结果}
+\begin{tabular}{ccc}
+\hline
+$p_1$ & $p_2$ & RMSE/$\mu\text{m}$ \\ \hline
+-0.1325 & 0.3228 & 0.1287 \\ \hline
+\end{tabular}
+\end{table}
+
+简化后的柱面镜头组的畸变模型可表示为：
+\begin{equation}
+\tilde{u} = f x_n (1 + h(x_n)) + u_0, \quad x_n = \frac{u - u_0}{f} \tag{3.9}
+\end{equation}
+
+\subsection{去畸变模型}
+
+去畸变的过程是由实际像素坐标 $\tilde{u}$ 计算理想像素坐标 $u$ 的过程。为了得到去畸变模型，本文将相对畸变重新定义为：
+\begin{equation}
+\Delta' = 
+\begin{cases} 
+\frac{x - \tilde{x}}{\tilde{x}} = \frac{x_n - \tilde{x}_n}{\tilde{x}_n} = g(\tilde{x}_n), & \tilde{x}_n \neq 0 \\
+0, & \tilde{x}_n = 0
+\end{cases} \tag{3.10}
+\end{equation}
+
+利用 MATLAB 中的曲线拟合工具箱，使用多项式对公式 (3.10) 进行拟合，结果显示 $g(\tilde{x}_n)$ 可同样表示为四阶多项式的形式，同时奇数次幂的系数可以忽略不计。$g(\tilde{x}_n)$ 拟合结果如下：
+\begin{equation}
+g(\tilde{x}_n) = k_1 \tilde{x}_n^2 + k_2 \tilde{x}_n^4 \tag{3.11}
+\end{equation}
+
+其中各个系数如表 3.3 所示，拟合结果的 RMSE 为 $0.1289 \mu\text{m}$。
+
+\begin{table}[h]
+\centering
+\caption{表 3.3 $g(\tilde{x}_n)$ 各项系数拟合结果}
+\begin{tabular}{ccc}
+\hline
+$k_1$ & $k_2$ & RMSE/$\mu\text{m}$ \\ \hline
+0.1349 & -0.3252 & 0.1289 \\ \hline
+\end{tabular}
+\end{table}
+
+图像去畸变模型可表示为：
+\begin{equation}
+u = G(\tilde{u}) = f \tilde{x}_n (1 + g(\tilde{x}_n)) + u_0, \quad \tilde{x}_n = \frac{\tilde{u} - u_0}{f} \tag{3.12}
+\end{equation}
+
+
+
+
+\section{考虑几何灵敏度的线阵相机参数加权估计方法}
+
+\subsection{问题背景与方法提出}
+
+经典的直接线性变换（DLT）标定方法在近场、高信噪比条件下通常能保持较好的稳定性。然而，在本文所涉及的 1m 至 6m 大工作距离范围以及复杂光照环境中，观测噪声往往呈现出显著的异方差特性（Heteroscedasticity）。若直接采用传统 DLT 方法并通过“差分消去”构建方程，极易导致远距离特征点的噪声耦合与误差放大，从而降低参数估计的最终精度。
+
+针对上述工程局限，本节引入统计信号处理中的加权估计思想，提出一种基于几何灵敏度与测量不确定性的加权最大似然估计（Weighted Maximum Likelihood Estimation, WMLE）方法。该方法主要包含三个核心策略：首先，摒弃传统的差分构方，转而采用交叉相乘残差构建目标函数，以避免被减项选择带来的数值不稳定性；其次，在最大似然估计的框架下，通过误差传播分析推导残差方差，从而定义统计意义上的最优权重；最后，结合鲁棒代价函数与工程先验，构建完整的非线性最小二乘标定流程。
+
+\subsection{加权目标函数的严格推导}
+
+\subsubsection{成像模型与交叉相乘残差}
+
+基于前文所述的七参数有理投影模型，线阵相机的一维投影关系通常描述为像点坐标 $u_j$ 是空间点坐标 $(X_j, Y_j, Z_j)$ 的分式函数：
+\begin{equation}
+u_j = \frac{l_1 X_j + l_2 Y_j + l_3 Z_j + l_4}{l_5 X_j + l_6 Y_j + l_7 Z_j + 1}
+\label{eq:rational_model}
+\end{equation}
+为了简化书写并明确物理意义，我们将分子项 $N_j$ 与分母项 $D_j$ 分别定义为：
+\begin{align}
+N_j &:= l_1 X_j + l_2 Y_j + l_3 Z_j + l_4 \\
+D_j &:= l_5 X_j + l_6 Y_j + l_7 Z_j + 1
+\end{align}
+其中，分母项 $D_j$ 在几何上对应于空间点在相机光轴方向上的投影深度（即射影深度因子）。
+
+直接使用公式 (\ref{eq:rational_model}) 进行参数估计面临非线性强、奇异点敏感等问题。鉴于此，我们将分式形式转化为交叉相乘（Cross-Product）形式，即等式两边同乘分母 $D_j$，得到关于待求参数 $\boldsymbol{p} = [l_1, \dots, l_7]^\top$ 的线性约束条件：
+\begin{equation}
+N_j - u_j D_j = 0
+\label{eq:cross_product_expanded}
+\end{equation}
+展开后可得：
+\begin{equation}
+(l_1 X_j + l_2 Y_j + l_3 Z_j + l_4) - u_j (l_5 X_j + l_6 Y_j + l_7 Z_j + 1) = 0
+\end{equation}
+这一变换具有双重优势：其一，它消除了直接除法可能引入的数值不稳定问题（尤其是当点位于无穷远平面附近时）；其二，它将原始的非线性模型转化为对参数线性的代数误差形式，为后续的高效初始化提供了可能。
+
+\subsubsection{误差传播与权重设计}
+
+设像素坐标的真实值为 $u_j^*$，观测值为 $u_j$，假设观测噪声服从零均值高斯分布：
+\begin{equation}
+u_j = u_j^* + \delta u_j, \quad \delta u_j \sim \mathcal{N}(0, \sigma_{u,j}^2)
+\end{equation}
+定义交叉相乘残差函数 $r_j(\boldsymbol{p}, u_j) = N_j - u_j D_j$。将观测模型代入该式，并利用一阶泰勒展开进行近似：
+\begin{equation}
+r_j = N_j - (u_j^* + \delta u_j) D_j = (N_j - u_j^* D_j) - \delta u_j D_j \approx - \delta u_j D_j
+\end{equation}
+由此可推导出残差的方差为：
+\begin{equation}
+\text{Var}[r_j] \approx \text{Var}[-\delta u_j D_j] = \sigma_{u,j}^2 D_j^2
+\end{equation}
+上述推导表明，通过引入交叉相乘项，残差对像素噪声的敏感度发生了变化。具体而言，几何因子 $D_j$（即景深相关项）对原始噪声起到了“放大”或“缩放”的作用。基于高斯噪声假设，残差 $r_j$ 近似服从分布 $\mathcal{N}(0, \sigma_{u,j}^2 D_j^2)$。
+
+为了获得最大似然估计（MLE），负对数似然函数可转化为加权最小二乘问题：
+\begin{equation}
+\min_{\boldsymbol{p}} J(\boldsymbol{p}) = \sum_{j=1}^{N} w_j r_j(\boldsymbol{p})^2
+\end{equation}
+其中，统计最优权重 $w_j$ 定义为：
+\begin{equation}
+w_j = \frac{1}{\sigma_{u,j}^2 D_j^2}
+\end{equation}
+该权重设计自然编码了成像几何灵敏度与测量不确定性：距离相机越远的点（$D_j$ 越大），其权重越低，这与物理直觉完全一致。
+
+\subsection{非线性优化与实施流程}
+
+\subsubsection{优化策略}
+
+针对上述模型，本文采用“两步法”优化策略，即首先通过线性代数方法获取高质量的参数初值，随后利用非线性迭代算法精化结果，以兼顾计算效率与估计精度。
+
+\paragraph{1. 线性初始化 (DLT/SVD)}
+基于交叉相乘公式 (\ref{eq:cross_product_expanded})，对于 $N$ 个观测点，我们可以构建如下形式的齐次线性方程组：
+\begin{equation}
+\boldsymbol{A} \boldsymbol{p} = \boldsymbol{0}
+\end{equation}
+其中数据矩阵 $\boldsymbol{A} \in \mathbb{R}^{N \times 7}$ 的第 $j$ 行向量 $\boldsymbol{a}_j$ 为：
+\begin{equation}
+\boldsymbol{a}_j = \left[ X_j, Y_j, Z_j, 1, -u_j X_j, -u_j Y_j, -u_j Z_j \right]
+\end{equation}
+为了避免零解（Trivial Solution），通常引入约束 $\|\boldsymbol{p}\| = 1$。此时，该问题的求解转化为寻找矩阵 $\boldsymbol{A}$ 的最小奇异值对应的右奇异向量。我们利用奇异值分解（SVD）对 $\boldsymbol{A}$ 进行分解，取其最后一行右奇异向量作为参数向量的初始估计值 $\boldsymbol{p}_0$。此步骤即为经典的直接线性变换（DLT）解法。
+
+\paragraph{2. 加权非线性迭代 (LM算法)}
+线性解虽然计算简便，但其最小化的是代数误差而非几何误差，且未考虑各观测点的噪声异方差性。因此，我们将 $\boldsymbol{p}_0$ 作为初值，采用 Levenberg-Marquardt (LM) 算法对加权平方残差和目标函数 $J(\boldsymbol{p})$ 进行非线性最小化：
+\begin{equation}
+\min_{\boldsymbol{p}} J(\boldsymbol{p}) = \sum_{j=1}^{N} w_j \left( N_j(\boldsymbol{p}) - u_j D_j(\boldsymbol{p}) \right)^2
+\end{equation}
+在第 $k$ 次迭代中，我们需要求解如下形式的增量正规方程（Augmented Normal Equations）以获取参数更新量 $\Delta \boldsymbol{p}$：
+\begin{equation}
+(\boldsymbol{J}^\top \boldsymbol{W} \boldsymbol{J} + \lambda \boldsymbol{I}) \Delta \boldsymbol{p} = -\boldsymbol{J}^\top \boldsymbol{W} \boldsymbol{r}
+\end{equation}
+其中：
+\begin{itemize}
+    \item $\boldsymbol{J}$ 为残差向量关于参数的雅可比矩阵；
+    \item $\boldsymbol{W} = \text{diag}(w_1, \dots, w_N)$ 为基于测量不确定性构建的权重矩阵；
+    \item $\lambda$ 为阻尼因子，用于在梯度下降法（大 $\lambda$）与高斯-牛顿法（小 $\lambda$）之间动态调节，确保算法在远离极值点时的稳定性和接近极值点时的收敛速度。
+\end{itemize}
+通过不断更新 $\boldsymbol{p} \leftarrow \boldsymbol{p} + \Delta \boldsymbol{p}$ 直至收敛，即可得到几何意义下最优的相机参数。
+
+\subsubsection{测量不确定性的估计与算法实现}
+
+为了准确计算权重，测量不确定性 $\sigma_{u,j}$ 的估计至关重要。本文采用重复成像法，即对每个空间标记点采集多帧图像（如 10 帧），计算其亚像素坐标的标准差作为 $\sigma_{u,j}$ 的估计值。
+
+综上所述，WMLE 线阵相机标定算法的完整实施流程如下：
+
+\begin{enumerate}
+    \item \textbf{数据归一化}：对输入数据 $(X_j, Y_j, Z_j)$ 和 $u_j$ 进行中心化与尺度归一化处理，以提高数值稳定性，并记录逆变换矩阵。
+    \item \textbf{线性初始化}：基于归一化数据构建线性方程组，利用 SVD 分解获取参数初值 $\boldsymbol{p}_0$。
+    \item \textbf{迭代优化 (LM算法)}：
+    \begin{itemize}
+        \item 更新几何因子：$D_j = l_5 X_j + l_6 Y_j + l_7 Z_j + 1$；
+        \item 更新权重：根据 $w_j = 1/(\sigma_{u,j}^2 D_j^2)$ 计算各点权重；
+        \item 计算残差与雅可比：构建加权残差向量与加权雅可比矩阵；
+        \item 求解增量并更新：求解阻尼最小二乘问题，更新参数 $\boldsymbol{p}$ 及阻尼系数 $\lambda$；
+        \item 收敛判断：若参数增量或残差下降率小于阈值，则停止迭代。
+    \end{itemize}
+    \item \textbf{参数恢复}：利用步骤 1 中的逆变换矩阵，将优化后的参数恢复至原始物理坐标系，输出最终标定结果及其协方差估计。
+\end{enumerate}
+
+该方法通过合理引入误差传播分析，在保证计算复杂度的前提下，有效提升了线阵视觉系统在复杂工程条件下的标定鲁棒性。
+
+
+
+
+\section{相机内参计算方法}
+
+定义线阵相机内参矩阵为：
+\begin{equation}
+\mathbf{K} = \begin{bmatrix} f & u_0 \\ 0 & 1 \end{bmatrix}
+\label{eq:intrinsic_def}
+\end{equation}
+
+定义矩阵 $\mathbf{B}$ 为：
+\begin{equation}
+\begin{aligned}
+\mathbf{B} &= \begin{bmatrix} \mathbf{b}_1 \\ \mathbf{b}_2 \end{bmatrix} = \begin{bmatrix} f & u_0 \\ 0 & 1 \end{bmatrix}^{-1} \mathbf{L} = \begin{bmatrix} \frac{1}{f} & -\frac{u_0}{f} \\ 0 & 1 \end{bmatrix} \mathbf{L} \\
+&= \begin{bmatrix} \frac{l_1 - u_0 l_5}{f} & \frac{l_2 - u_0 l_6}{f} & \frac{l_3 - u_0 l_7}{f} & \frac{l_4 - u_0}{f} \\ l_5 & l_6 & 1 \end{bmatrix}
+\end{aligned}
+\label{eq:matrix_B}
+\end{equation}
+其中 $\lambda$ 为任意缩放因子。
+
+由于 $\mathbf{R}$ 是正交矩阵，其行向量的模均为 1，且任意两行不同向量的内积为 0。由 $\mathbf{r}_1 \cdot \mathbf{r}_3 = 0$ 可得如下关系：
+\begin{equation}
+\mathbf{b}_1 \mathbf{b}_2^T = \lambda^2 \mathbf{r}_1 \mathbf{r}_3^T = 0
+\label{eq:orthogonality_constraint}
+\end{equation}
+
+进一步整理可得：
+\begin{equation}
+\left(l_5^2 + l_6^2 + 1\right) u_0 = l_1 l_5 + l_2 l_6 + l_3
+\label{eq:solve_u0}
+\end{equation}
+
+由 $\mathbf{r}_1 \mathbf{r}_1^T = \mathbf{r}_3 \mathbf{r}_3^T = 1$ 可得如下关系：
+\begin{equation}
+\mathbf{b}_1 \mathbf{b}_1^T = \mathbf{b}_2 \mathbf{b}_2^T
+\label{eq:norm_constraint}
+\end{equation}
+
+结合公式(\ref{eq:solve_u0})，进一步整理可得：
+\begin{equation}
+l_1^2 + l_2^2 + l_3^2 - \left(l_1 l_5 + l_2 l_6 + l_3\right) u_0 = \left(l_5^2 + l_6^2 + 1\right) f^2
+\label{eq:solve_f}
+\end{equation}
+
+获取空间中少量（数量大于 7 个）固定的标记点对应的像点，用上一小节的方法可计算出投影矩阵 $\mathbf{L}$。根据公式(\ref{eq:solve_u0})可计算出 $u_0$，之后根据已知 $u_0$ 和公式(\ref{eq:solve_f})可计算出 $f$。
+
+需要有效确保像点在线阵 CCD 上均匀分布。
+
+\section{相机坐标系和世界坐标系之间的刚体变换}
+
+每个投影矩阵 $\mathbf{L}$ 都对应了一组 $[\mathbf{R} \mid \mathbf{t}]$。相机坐标系 $\mathcal{F}_c$ 和世界坐标系 $\mathcal{F}_w$ 之间的旋转矩阵 $\mathbf{R}$ 和平移向量 $\mathbf{t}$ 可由上一节算出的相机内参和对应的 $\mathbf{L}$ 计算。结合前述公式可得旋转向量：
+\begin{equation}
+\mathbf{r}_1 = \frac{\left[ l_1 - u_0 l_5,\ \ l_2 - u_0 l_6,\ \ l_3 - u_0 l_7 \right]}{\left\| \left[ l_1 - u_0 l_5,\ \ l_2 - u_0 l_6,\ \ l_3 - u_0 l_7 \right] \right\|}
+\label{eq:solve_r1}
+\end{equation}
+
+\begin{equation}
+\mathbf{r}_3 = \frac{\left[ l_5,\ \ l_6,\ \ l_7 \right]}{\left\| \left[ l_5,\ \ l_6,\ \ l_7 \right] \right\|}
+\label{eq:solve_r3}
+\end{equation}
+
+\begin{equation}
+\mathbf{r}_2 = \mathbf{r}_3 \times \mathbf{r}_1
+\label{eq:solve_r2}
+\end{equation}
+
+平移向量的分量计算如下：
+\begin{equation}
+t_z = \frac{1}{\left\| \left[ l_5,\ \ l_6,\ \ l_7 \right] \right\|}
+\label{eq:solve_tz}
+\end{equation}
+
+\begin{equation}
+t_x = \frac{l_4 - u_0}{f} \cdot t_z
+\label{eq:solve_tx}
+\end{equation}
+
+平移向量的 $Y$ 轴部分 $t_y$ 无法计算，将其设定为 0，这和配有柱面镜的线阵相机特性相符，即在相机坐标系下，若空间中一标记点的 $X$、$Z$ 轴方向坐标不变，$Y$ 轴方向上的变化不会导致像点位置变化。
+
+由于噪声和镜头畸变的影响，计算出的 $\mathbf{R}$ 不一定满足标准旋转矩阵的所有约束（如正交性），通常需要使用 SVD 重新计算新的旋转矩阵以确保其处于 $SO(3)$ 空间内。
+
+
+
+
+\section{仿真实验}
+
+% [此处插入仿真实验内容与图片]
+% 1. 郑雪定位传感器可测视域仿真
+% 2. 郑雪标定点高度对重建误差的影响仿真
+% 3. 陈奇的标记点定位仿真实验
+% 4. Gemini给的两个实验
+
+
+\section{小结}
+综上所述，
+本文所采用的加权参数估计策略并非对传统标定理论的扩展，
+而是面向线阵视觉系统工程应用需求，
+通过合理引入误差传播分析结果，
+在保证计算复杂度可控的前提下，
+有效缓解了远距离标定与数据质量波动对参数估计稳定性的影响，
+为后续系统集成与长期运行提供了可靠基础。
+本章以\textbf{交叉相乘残差 + MLE 权重}构建线阵相机的\textbf{加权最大似然标定}，其权重严格由\textbf{像素噪声与几何灵敏度}推导而来，并提供了从初始化到鲁棒迭代与不确定度评估的完整可落地流程。在 RA8 工装坐标高可信的条件下，像素噪声主导、权重 $1/(\sigma_{u,j}^2 D_j^2)$ 即为自然、严谨且有效的选择。

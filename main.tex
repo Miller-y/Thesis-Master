@@ -1,0 +1,75 @@
+% !Mode:: "TeX:UTF-8"
+\documentclass[type=master,openany,pifootnote,nocolor]{shuthesis}
+% 选项:
+%  type=[master|profmaster|doctor], % 必选
+%  secret,                          % 可选 (如果论文需要保密, 这一项需要打开)
+%  pifootnote,                      % 可选（建议打开）
+%  openany|openright,               % 可选 (章首页是右开还是任意开, 默认是右开)
+%  nocolor                          % 提交最终版本时请打开此选项
+\usepackage{shuthesis}
+% \usepackage{newtxmath}
+\graphicspath{{figures/}}
+
+%\includeonly{data/chap02}  % <--- 只编译 chap01，但保留其他章节的引用/页码信息
+
+\begin{document}
+\frontmatter
+\shusetup{
+  %%%%%%%% 1. 配置里面不要出现空行. 2. 不需要的配置信息可以删除. %%%%%%%%%%%
+  secretlevel={公开},             % 秘级
+  % 中文信息
+  ctitle={基于线阵视觉与信道状态信息的协同室内定位关键技术研究},
+  cdisciplines={工学},
+  cdepartment={机电工程与自动化学院},
+  cmajor={\textbf{控制理论与控制工程}},
+  cauthor={\textbf{袁志鹏}},
+  csupervisor={\textbf{杨庆华}},
+  id={23721949},
+  catalognumber={TP242.3},
+  cdate={2026 年 5 月},
+  coverdate={\zhdigits{2026}年\zhnumber{5}月},
+  % 英文信息
+  etitle={Research on Key Technologies of Collaborative Indoor Positioning Based on Linear Array Vision and Channel State Information},
+  edisciplines={Engineering},
+  edepartment={School of Mechanical Engineering and Automation Shanghai University},
+  emajor={Control Theory and Control Engineering},
+  eauthor={Zhipeng Yuan},
+  esupervisor={Qinghua Yang},
+  edate={May, 2026},
+  % 是否在目录显示摘要
+  showabstract={true},
+}
+
+\input{data/abstract}
+\makefirstpage                         % 生成带有学校 logo 的封面
+\makecover
+
+\tableofcontents                       % 目录
+
+% \input{data/denotation}                % 符号对照表
+
+% 正文部分
+\mainmatter
+% \include{data/chap01}
+% \include{data/chap02}
+% \include{data/chap03}
+\include{data/chap04}
+\include{data/chap05}
+% \include{data/chap06}
+% \listoffigures                        % 插图索引
+% \listoftables                         % 表格索引
+
+% 参考文献. 
+\bibliographystyle{gbt7714-numerical}
+\nocite{*} 
+\bibliography{reference/refs}
+
+\include{data/publications}           % 发表论文清单
+\include{data/acknowledgement}        % 致谢
+
+\backmatter
+\begin{appendix}
+\input{data/appendix}
+\end{appendix}
+
+\end{document}
