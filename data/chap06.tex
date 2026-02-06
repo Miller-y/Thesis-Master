@@ -159,50 +159,18 @@ Tracker）}：作为大范围空间测量的“黄金标准”，用于实时捕
     \label{fig:calibration_devices}
 \end{figure}
 
-\subsubsection{时空基准对齐流程}
-标定过程旨在建立 LED 光学中心与世界坐标系之间的刚性变换关系，具体分为两个阶段：
+% \subsubsection{时空基准对齐流程}
+% 标定过程旨在建立 LED 光学中心与世界坐标系之间的刚性变换关系，具体分为两个阶段：
 
-\textbf{1. 离线几何建模（局部坐标系构建）}
-在静态环境下，利用三维坐标测量臂对标定板上的 LED 安装节点及靶球基座进行多点接触式采样。通过空间圆拟合算法，解算出各 LED 光心相对于靶球基座中心（Base Center）的局部坐标向量 $\mathbf{P}_{local}$。基于刚体假设，无论标定板如何移动，该相对几何关系始终保持不变。
+% \textbf{1. 离线几何建模（局部坐标系构建）}
+% 在静态环境下，利用三维坐标测量臂对标定板上的 LED 安装节点及靶球基座进行多点接触式采样。通过空间圆拟合算法，解算出各 LED 光心相对于靶球基座中心（Base Center）的局部坐标向量 $\mathbf{P}_{local}$。基于刚体假设，无论标定板如何移动，该相对几何关系始终保持不变。
 
-\textbf{2.在线位姿解算（世界坐标系映射）}
-在实验过程中，激光跟踪仪实时锁定靶球基座，获取其在世界坐标系下的位置坐标与姿态四元数。结合离线阶段获取的几何拓扑关系，通过刚体变换矩阵（Rigid Body Transformation Matrix）将 LED 的局部坐标 $\mathbf{P}_{local}$ 映射至全局世界坐标系 $\mathbf{P}_{world}$：
-\begin{equation}
-    \mathbf{P}_{world} = \mathbf{R} \cdot \mathbf{P}_{local} + \mathbf{T}
-\end{equation}
-其中 $\mathbf{R}$ 和 $\mathbf{T}$ 分别为由激光跟踪仪测得的旋转矩阵与平移向量。该方法为线阵 CCD 系统提供了具有工业级精度的空间参考点，确保了后续训练数据的标签误差远低于 Wi-Fi 信号的物理分辨率。
-
-\subsection{多维评估场景设计}
-\label{subsec:scenarios_design}
-% [原 6.5.2 内容移动至此。这是属于“实验方法论”的内容]
-
-针对单一 LOS 场景难以验证系统鲁棒性的问题，本研究设计了以下三组递进式实验场景，旨在从精度上限、遮挡恢复能力及抗干扰能力三个维度对算法进行综合评估。
-
-\subsubsection{场景一：理想视距（LOS）基准测试}
-\begin{itemize}
-    \item \textbf{实验设置}：移除实验空间内的所有障碍物，确保 CCD 视觉链路与 Wi-Fi 射频链路均无遮挡。
-    \item \textbf{采集过程}：实验人员位于长方体空间外部，通过直径 1cm、长 2m 的细长实心木棍控制目标小球，使其以约 $0.1\text{m/s}$ 的速度在空间内部进行缓慢匀速移动。
-    \item \textbf{目的}：采集高质量的训练数据构建指纹库，并验证系统在理想条件下的定位精度上限。
-\end{itemize}
-
-\subsubsection{场景二：物理约束下的非视距（NLOS）遮挡测试}
-\begin{itemize}
-    \item \textbf{实验挑战}：在验证 NLOS 性能时，通常面临“视觉真值与射频信号同时被遮挡”的悖论。
-    \item \textbf{解决方案}：采用“物理轨迹约束法”。在实验区域中心铺设直线导轨，并在导轨中段设置不透明障碍物（阻断 Wi-Fi 直射路径并遮挡 CCD 视线），使导轨两端（区域 A、B）处于可视区，中间（区域 C）处于盲区。
-    \item \textbf{采集过程}：控制目标小球沿导轨匀速穿过遮挡区域。
-    \item \textbf{真值构建策略}：虽然 CCD 无法记录遮挡区内的实时坐标，但基于第五章建立的恒定速度（CV）运动模型，利用 CCD 记录的目标进入遮挡区时刻 $t_{start}$ 的坐标 $P_{start}$ 与离开遮挡区时刻 $t_{end}$ 的坐标 $P_{end}$，通过时空线性插值（Spatiotemporal Linear Interpolation）生成遮挡区内的物理真值 $G(t)$：
-    \begin{equation} 
-       G(t) = P_{start} + \frac{P_{end} - P_{start}}{t_{end} - t_{start}} \times (t - t_{start}), \quad t \in (t_{start}, t_{end})
-    \end{equation}
-    该方法有效解决了传感器盲区内的真值获取难题，用于评估系统在全遮挡条件下的定位稳定性。
-\end{itemize}
-
-\subsubsection{场景三：人机共存的动态干扰测试}
-\begin{itemize}
-    \item \textbf{实验设置}：保持 CCD 视觉链路通视，引入一名实验人员作为动态干扰源。
-    \item \textbf{干扰模式}：干扰者在 Wi-Fi 收发链路附近进行随机走动或切断信号路径，制造强多径效应与环境噪声。
-    \item \textbf{目的}：CCD 持续记录受干扰状态下的目标真值，用于验证自适应卡尔曼滤波/粒子滤波算法对突变观测噪声的抑制能力及系统的环境鲁棒性。
-\end{itemize}
+% \textbf{2.在线位姿解算（世界坐标系映射）}
+% 在实验过程中，激光跟踪仪实时锁定靶球基座，获取其在世界坐标系下的位置坐标与姿态四元数。结合离线阶段获取的几何拓扑关系，通过刚体变换矩阵（Rigid Body Transformation Matrix）将 LED 的局部坐标 $\mathbf{P}_{local}$ 映射至全局世界坐标系 $\mathbf{P}_{world}$：
+% \begin{equation}
+%     \mathbf{P}_{world} = \mathbf{R} \cdot \mathbf{P}_{local} + \mathbf{T}
+% \end{equation}
+% 其中 $\mathbf{R}$ 和 $\mathbf{T}$ 分别为由激光跟踪仪测得的旋转矩阵与平移向量。该方法为线阵 CCD 系统提供了具有工业级精度的空间参考点，确保了后续训练数据的标签误差远低于 Wi-Fi 信号的物理分辨率。
 
 
 % =========================================================================
@@ -222,15 +190,36 @@ Tracker）}：作为大范围空间测量的“黄金标准”，用于实时捕
 \label{subsec:system_results}
 
 % [此处对应原 6.5.2 的结果部分，目前建立框架]
+针对单一 LOS 场景难以验证系统鲁棒性的问题，本研究设计了以下两组实验场景，旨在从精度上限、遮挡恢复能力两个个维度对算法进行综合评估。
 
 \subsubsection{理想场景下的精度上限分析}
 % 对应场景一的结果。展示 LOS 下的 CDF 图，对比纯 CSI 和 光电协同 的精度。
+\begin{itemize}
+    \item \textbf{实验设置}：移除实验空间内的所有障碍物，确保 CCD 视觉链路与 Wi-Fi 射频链路均无遮挡。
+    \item \textbf{采集过程}：实验人员位于长方体空间外部，通过直径 1cm、长 2m 的细长实心木棍控制目标小球，使其以约 $0.1\text{m/s}$ 的速度在空间内部进行缓慢匀速移动。
+    \item \textbf{目的}：采集高质量的训练数据构建指纹库，并验证系统在理想条件下的定位精度上限。
+\end{itemize}
 
 \subsubsection{遮挡恢复与 NLOS 鲁棒性分析}
 % 对应场景二的结果。展示在导轨遮挡区，纯 CSI 可能会漂移，而协同系统利用 RF 备份模式维持了多少精度。
+\begin{itemize}
+    \item \textbf{实验挑战}：在验证 NLOS 性能时，通常面临“视觉真值与射频信号同时被遮挡”的悖论。
+    \item \textbf{解决方案}：采用“物理轨迹约束法”。在实验区域中心铺设直线导轨，并在导轨中段设置不透明障碍物（阻断 Wi-Fi 直射路径并遮挡 CCD 视线），使导轨两端（区域 A、B）处于可视区，中间（区域 C）处于盲区。
+    \item \textbf{采集过程}：控制目标小球沿导轨匀速穿过遮挡区域。
+    \item \textbf{真值构建策略}：虽然 CCD 无法记录遮挡区内的实时坐标，但基于第五章建立的恒定速度（CV）运动模型，利用 CCD 记录的目标进入遮挡区时刻 $t_{start}$ 的坐标 $P_{start}$ 与离开遮挡区时刻 $t_{end}$ 的坐标 $P_{end}$，通过时空线性插值（Spatiotemporal Linear Interpolation）生成遮挡区内的物理真值 $G(t)$：
+    \begin{equation} 
+       G(t) = P_{start} + \frac{P_{end} - P_{start}}{t_{end} - t_{start}} \times (t - t_{start}), \quad t \in (t_{start}, t_{end})
+    \end{equation}
+    该方法有效解决了传感器盲区内的真值获取难题，用于评估系统在全遮挡条件下的定位稳定性。
+\end{itemize}
 
-\subsubsection{动态环境干扰下的稳定性分析}
-% 对应场景三的结果。展示有人走动时，定位误差的波动情况。
+% \subsubsection{场景三：人机共存的动态干扰测试}
+% \begin{itemize}
+%     \item \textbf{实验设置}：保持 CCD 视觉链路通视，引入一名实验人员作为动态干扰源。
+%     \item \textbf{干扰模式}：干扰者在 Wi-Fi 收发链路附近进行随机走动或切断信号路径，制造强多径效应与环境噪声。
+%     \item \textbf{目的}：CCD 持续记录受干扰状态下的目标真值，用于验证自适应卡尔曼滤波/粒子滤波算法对突变观测噪声的抑制能力及系统的环境鲁棒性。
+% \end{itemize}
+
 
 \section{本章小结}
 % 总结本章工作：实现了硬件，设计了严谨的真值获取方案，并通过实验验证了系统的优越性。

@@ -1,224 +1,300 @@
 % !Mode:: "TeX:UTF-8"
-\chapter{Wi-Fi 信道状态信息定位技术相关理论}
+\chapter{线阵相机三维定位的成像模型与几何基础}
+\label{chap:principle}
 
-\section{Wi-Fi 信号简介}
+\section{引言}
 
-\subsection{无线局域网 (WLAN) 标准概述}
-无线局域网（Wireless Local Area Network, WLAN）是指利用射频（Radio Frequency, RF）技术构建的局部网络系统，旨在实现终端设备的无线接入与数据交互。作为 WLAN 领域应用最为广泛的技术标准，Wi-Fi（Wireless Fidelity）主要基于国际电气和电子工程师协会（IEEE）制定的 802.11 标准族。
+为获取室内点光源的高精度三维位置信息，并为后续基于CSI的深度学习模型训练提供可靠的坐标真值（Ground Truth），本研究设计并实现了一套包含Y型光学定位传感器（LOPS）、点光源同步控制系统及上位机解算软件的光学定位系统。如图\ref{fig:yops_system}所示，LOPS主体由三个线阵CCD构成，三者呈“Y”字形共面排布，相邻CCD之间的夹角固定为$120^{\circ}$。系统选用波长850~nm的红外LED作为被测点光源，并通过控制系统实现光源脉冲与LOPS曝光时序的微秒级同步。通过提取点光源在三个线阵CCD上的成像位置，结合系统几何模型与空间交会原理，即可重构出目标的精确三维坐标。
 
-自 1997 年首个标准发布以来，IEEE 802.11 经历了多次重大技术演进。其核心演进逻辑主要围绕提高吞吐量、扩展频段资源以及优化多用户并发性能展开：
+% --- 插入图2.1 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/Y型光学定位传感器（LOPS）系统结构示意图.pdf} 
+    % \fbox{\parbox[c][4cm]{0.8\textwidth}{\centering 请替换为LOPS系统结构图 (figures/yops\_structure.pdf)}} % 占位符
+    \caption{Y型光学定位传感器（LOPS）系统结构示意图}
+    \label{fig:yops_system} % 对应文中的 \ref{fig:yops_system}
+\end{figure}
+
+
+本章将首先阐述线阵相机的成像机理及光斑中心亚像素定位算法；随后定义系统所涉及的坐标系、介绍不同坐标系的变换关系以及推导正向成像模型；最后详细论述基于多线阵CCD的空间点定位原理，旨在为后续的系统参数标定提供必要的理论支撑。
+
+\section{线阵相机成像原理}
+
+\subsection{柱面镜头组成像模型}
+
+本文所用线阵相机由柱面镜头和线阵CCD组成。和普通相机镜头组一样，该线阵相机的成像镜头也是由多组不同的镜片组成。图\ref{fig:cylindrical_lens_layout}展示了线阵相机所用柱面透镜的光学布局，该镜头组由光学设计软件ZEMAX设计。在$YZ$视图内，整个视场内的所有光线均被压缩成与线阵CCD成像单元所在直线正交的一条短线，光线$Y$方向上入射角度的变化不会导致图像上对应的像点位置变化。在$XZ$视图中，平行光线被聚焦为在CCD上的一点，$X$方向上入射角不同的光线被折射到不同像点。
+
+% --- 插入图2.2 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/chap04/柱面镜头组原理图.pdf}
+    %\fbox{\parbox[c][4cm]{0.8\textwidth}{\centering 请替换为柱面透镜光学布局图 (figures/lens\_zemax.pdf)}} % 占位符
+    \caption{基于ZEMAX设计的柱面透镜光学布局（含YZ与XZ视图）}
+    \label{fig:cylindrical_lens_layout} % 对应文中的 \ref{fig:cylindrical_lens_layout}
+\end{figure}
+
+
+根据柱面镜头成像特点，可将其成像模型简化为一维小孔成型模型，如图\ref{fig:1d_pinhole_model}所示。图中用一个柱面镜表示实际的柱面镜头组，线阵CCD垂直于柱面镜头的轴心线。另外，为了降低环境光线的干扰，增加定位系统的鲁棒性，柱面镜头添加了850~nm的窄带滤光片。
+
+% --- 插入图2.3 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/一维小孔成像模型.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为一维小孔成像模型图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{线阵相机的一维小孔成像简化模型}
+    \label{fig:1d_pinhole_model} % 对应文中的 \ref{fig:1d_pinhole_model}
+\end{figure}
+
+
+此时，点光源形成的线状像与线阵CCD的光敏阵列垂直相交，该交点即为点光源在传感器上的有效像点。由此可知，线阵相机的像点和柱面镜的轴心线确定了一个平面，该像点对应的标记点在这一平面内。在实际应用中，由于加工工艺和装备工艺等原因，实际的成像模型并非小孔成像模型，实际像点和理想像点之间存在一定偏差，即畸变。为了提高测量精度，需要使用合适的镜头畸变模型和标定算法来修正相机的像点位置，具体去畸变方法见第三章。
+\subsection{光斑中心定位算法}
+
+理想光学成像系统可以将标记点发出的光线聚焦在线阵CCD上的一个感光单元上，如图\ref{fig:dream_light_spot_model}所示。
+% --- 插入图2.4 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/理想光斑信号模型.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为理想光斑信号模型图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{理想光斑信号模型}
+    \label{fig:dream_light_spot_model} % 对应文中的 \ref{fig:dream_light_spot_model}
+\end{figure}
+
+但在实际应用中，标记点发出的光线经柱面镜头组折射后在CCD上的成像往往是一个光斑，如图\ref{fig:real_light_spot_model}所示，线阵CCD像素上的光强越 大，对应灰度值越大。想要提高测量精度必须使用亚像素定位细分算法对光斑进行处理，提高光斑中心定位的分辨率。
+
+% --- 插入图2.5 (请替换文件名) ---
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/实际光斑信号.pdf}
+    %\fbox{\parbox[c][4cm]{0.6\textwidth}{\centering 请替换为实际光斑信号图 (figures/pinhole\_model.pdf)}} % 占位符
+    \caption{实际光斑信号}
+    \label{fig:real_light_spot_model} % 对应文中的 \ref{fig:real_light_spot_model}
+\end{figure}
+
+亚像素定位细分算法的核心在于从像素阵列中精确提取光斑的几何中心。常见的算法包括灰度质心法与平方加权质心法。灰度质心法假定光斑能量分布与像素灰度呈线性关系，计算简单但抗噪能力有限；平方加权质心法通过对灰度值进行平方加权，提升了高信噪比区域（光斑中心）的权重，增强了鲁棒性，但受限于物理像素分辨率，其精度提升存在瓶颈。
+
+为平衡嵌入式系统的计算效率与亚像素精度，本文在对比上述方法的基础上，选用线性插值质心法[94]。该方法首先通过线性插值在有效像素区间内重构亚像素级灰度分布，再利用平方加权法计算质心，能够在有限的计算资源下有效改善量化误差。
+
+根据线性插值理论，假设插值点 $m_i$ 位于 $u_i$ 和 $u_{i+1}$ 之间，则该插值点对应的灰度值为：
+\begin{equation}
+p(m_i) = (u_{i+1} - m_i) p_i + (m_i - u_i) p_{i+1}
+\label{eq:2.3}
+\end{equation}
+其中 $p(\cdot)$ 为计算插值点灰度值的函数。经过插值后，光斑质心位置的计算公式为：
+\begin{equation}
+\hat{u} = \frac{\sum_{i=1}^{N} p_i^2 u_i + \sum_{i=1}^{N-1} p(m_i)^2 m_i}{\sum_{i=1}^{N} p_i^2 + \sum_{i=1}^{N-1} p(m_i)^2}
+\label{eq:2.4}
+\end{equation}
+
+本文选择该方法的原因在于其在保证亚像素精度的同时，计算复杂度较低，适合在 STM32 等嵌入式平台上实时实现，为后续多传感器协同提供稳定的视觉观测输入。
+为方便表述，下文中标记点对应 的像点均表示经过亚像素细分定位算法处理后得到的光斑中心。
+
+
+
+\section{坐标系的建立}
+\label{sec:coordinate_systems}
+
+线阵相机成像与三维空间定位的本质，是建立从一维离散像素阵列到三维连续物理空间的数学映射。为清晰描述这一几何过程，并实现多传感器数据的空间对齐，本研究建立了五个层次的坐标系，形成了一条完整的坐标变换链。各坐标系的定义及其符号约定如下：
 
 \begin{itemize}
-    \item \textbf{初期标准}：如 802.11b/g 主要工作在 2.4GHz 频段，奠定了无线通信的基础框架。
-    \item \textbf{高吞吐量阶段}：802.11n (Wi-Fi 4) 引入了多输入多输出（MIMO）技术，显著提升了传输速率。
-    \item \textbf{全频段与高效率阶段}：802.11ac (Wi-Fi 5) 进一步优化了 5GHz 频段的传输能力，而 802.11ax (Wi-Fi 6) 则引入了正交频分多址（OFDMA）技术，有效解决了高密度场景下的频谱效率问题。
+    \item \textbf{像素坐标系} $P$ ($O_P - u$)：描述传感器原始离散采样数据；
+    \item \textbf{图像坐标系} $I$ ($O_I - x$)：描述成像平面的物理几何尺寸；
+    \item \textbf{相机坐标系} $C$ ($O_C - XYZ$)：描述透视投影几何关系；
+    \item \textbf{传感器坐标系} $S$ ($O_S - XYZ$)：描述LOPS系统的整体机体姿态；
+    \item \textbf{世界坐标系} $W$ ($O_W - XYZ$)：描述绝对空间位置的惯性基准。
 \end{itemize}
 
-目前，Wi-Fi 技术已从单纯追求峰值速率转向对低时延、高可靠性及多频段协同（2.4GHz、5GHz 及 6GHz）的深度优化。
+\subsection{像素坐标系 (Pixel Coordinate System)}
+\label{subsec:pixel_coords}
 
-\subsection{Wi-Fi 信号的传播特征}
-\label{subsec:wifi_propagation}
+像素坐标系 $P$ 是线阵CCD获取原始图像数据的最底层参考系。
+如图 \ref{fig:P_coordinate_systems} 所示，该坐标系原点 $O_P$ 位于线阵CCD感光阵列的首个有效感光单元，$u$ 轴正方向沿感光单元排列方向延伸。
+像素坐标系的主要作用是提供图像采样的索引位置，其单位为像素（pixel）。数值 $u$ 直接反映了像点在数字图像中的离散地址，是后续物理量化计算的基础。
 
-Wi-Fi 信号本质上属于高频电磁波，其在空间中的传播过程并非理想化的直线传输，而是受到传播距离、环境结构及动态扰动等多种物理因素的共同影响。为了为后续基于信道状态信息（CSI）的感知与定位方法提供物理基础，本节从路径损耗、多径传播以及信道时变性三个方面，对室内 Wi-Fi 信号的传播特征进行系统分析。
+\begin{figure}[htbp]
+    \centering
+    % 注意：保持了您原有的图片路径
+    \includegraphics[width=0.4\textwidth]{figures/chap04/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{像素坐标系示意图}
+    \label{fig:P_coordinate_systems}
+\end{figure}
 
-在理想自由空间条件下，Wi-Fi 信号在传播过程中主要表现为能量的空间扩散，其路径损耗可由 Friis 传输方程进行描述。设发射功率为 $P_t$，接收功率为 $P_r$，则二者之间的关系可表示为：
+\subsection{图像坐标系 (Image Coordinate System)}
+\label{subsec:image_coords}
+
+图像坐标系 $I$ 旨在将离散的像素索引转化为具有实际物理尺寸（毫米级）的几何描述。
+如图 \ref{fig:I_coordinate_systems} 所示，其 $x$ 轴与像素坐标系 $u$ 轴共线。原点 $O_I$ 定义为\textbf{像主点}，即柱面镜头光轴与线阵CCD感光平面的几何交点。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.4\textwidth]{figures/chap04/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{图像坐标系与像素坐标系的对应关系}
+    \label{fig:I_coordinate_systems}
+\end{figure}
+
+设像点在图像坐标系中的坐标为 $x$ (mm)，在像素坐标系中的坐标为 $u$ (pixel)，两者通过以下线性关系关联：
 \begin{equation}
-P_r = P_t G_t G_r \left( \frac{\lambda}{4\pi d} \right)^2 L^{-1},
+    u = \frac{x}{\mathrm{d}x} + u_0 \label{eq:pixel_affine}
 \end{equation}
-其中，$G_t$ 与 $G_r$ 分别表示发射端与接收端天线增益，$\lambda$ 为信号波长，$d$ 为传播距离，$L$ 为系统损耗因子。该模型表明，在理想条件下接收信号功率与传播距离的平方成反比。
+其中，$\mathrm{d}x$ 表示单个感光单元的物理宽度 (mm/pixel)，$u_0$ 表示像主点在像素坐标系下的偏置坐标。
+值得注意的是，在理想光学系统中 $u_0$ 应位于CCD几何中心，但受镜头装配误差及光学畸变影响，实际系统中 $u_0$ 通常存在非零偏差，需作为内参进行标定修正。
 
-然而，在实际室内环境中，自由空间模型难以准确刻画复杂传播条件下的信号衰减特性。为此，工程实践中通常采用对数距离路径损耗模型（Log-distance Path Loss Model）对平均路径损耗进行建模，其表达式为：
+\subsection{线阵相机坐标系 (Camera Coordinate System)}
+\label{subsec:camera_coords}
+
+相机坐标系 $C$ 是描述透视投影几何关系的核心参考系。
+其原点 $O_C$ 位于镜头组的光学中心，$Z_C$ 轴沿镜头光轴指向物体方向，$X_C$ 轴与图像坐标系 $x$ 轴平行，$Y_C$ 轴方向由右手定则确定。
+根据线阵相机的一维小孔成像模型（柱面镜模型），空间点 ${}^C \bm{M} = [X_C \quad Y_C \quad Z_C]^T$ 与其图像物理坐标 $x_I$ 满足相似三角形关系：
 \begin{equation}
-PL(d) = PL(d_0) + 10n \log_{10}\left( \frac{d}{d_0} \right) + X_\sigma,
+    \frac{x_I}{f_m} = \frac{X_C}{Z_C} \label{eq:pinhole_model}
 \end{equation}
-其中，$n$ 为路径损耗指数，用以表征环境复杂程度，$X_\sigma$ 为均值为零、标准差为 $\sigma$ 的高斯随机变量，用于描述由墙体、家具等障碍物遮挡引起的阴影衰落效应。该模型在统计意义上更符合室内无线传播的实际特性。
+其中 $f_m$ 表示线阵相机的物理焦距 (mm)。
 
-除路径损耗外，多径传播是室内 Wi-Fi 信号的另一显著特征。由于电磁波在传播过程中会与墙体、地面及各类物体发生反射、绕射与散射，接收端获得的信号往往由多条传播路径分量叠加而成。该过程可通过信道冲激响应（Channel Impulse Response, CIR）进行描述：
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.4\textwidth]{figures/chap04/坐标系I、坐标系P和坐标系C之间的关系.pdf}
+    \caption{相机坐标系、图像坐标系与像素坐标系的投影几何关系}
+    \label{fig:camera_projection}
+\end{figure}
+
+如图 \ref{fig:camera_projection} 所示，联立公式 (\ref{eq:pixel_affine}) 与 (\ref{eq:pinhole_model})，并引入齐次坐标形式，可推导出从相机空间到像素空间的投影方程：
 \begin{equation}
-h(t) = \sum_{l=1}^{L} \alpha_l e^{j\phi_l} \delta(t - \tau_l),
+    Z_C \begin{bmatrix} u \\ 1 \end{bmatrix} = 
+    \begin{bmatrix} 
+    f & 0 & u_0 \\
+    0 & 0 & 1 
+    \end{bmatrix}
+    \begin{bmatrix} X_C \\ Y_C \\ Z_C \end{bmatrix} \label{eq:intrinsic_matrix}
 \end{equation}
-其中，$L$ 表示有效传播路径的数量，$\alpha_l$、$\phi_l$ 与 $\tau_l$ 分别对应第 $l$ 条路径的幅度、相位偏移及时延。由于不同路径分量具有不同的到达时间，多径效应会在频域上引入频率选择性衰落，这也是 Wi-Fi 系统普遍采用正交频分复用（OFDM）技术以对抗信道失真的重要原因。
+式中，$f = f_m / \mathrm{d}x$ 为以像素为单位的等效焦距。该矩阵即为线阵相机的\textbf{内参矩阵}，它囊括了焦距与主点偏移等固有属性。
 
-此外，室内无线信道通常表现出显著的时变特性。当环境中存在人员移动或物体位移时，多径结构会随时间发生变化，导致信道增益和相位持续波动。在无明显直射路径的非视距（Non-Line-of-Sight, NLOS）条件下，接收信号幅度常采用瑞利衰落模型进行统计描述；而在存在较强直射分量的视距（Line-of-Sight, LOS）场景中，则更适合使用莱斯衰落模型。上述衰落模型为理解信道随机性及其对通信性能的影响提供了理论依据。
+\subsection{传感器坐标系 (Sensor Coordinate System)}
+\label{subsec:sensor_coords}
 
-对于基于 CSI 的无线感知与定位研究而言，相较于仅反映整体接收功率变化的 RSSI 指标，CSI 能够在子载波级别刻画信道的幅度与相位响应，从而更加细粒度地反映多径结构与环境变化。这一特性为后续从无线信号中挖掘目标空间信息提供了重要支撑。
+由于LOPS系统采用三个线阵相机呈Y型共面布局，为统一各相机的观测数据，需建立传感器坐标系 $S$ 描述整个传感器的机体姿态。
+原点 $O_S$ 设定于传感器的几何中心（即Y型结构的中心点）。
 
-\section{Wi-Fi 无线定位参数}
-
-在无线定位系统中，特征参数的提取精度直接决定了定位算法的性能上限。Wi-Fi 定位技术主要利用无线网卡在通信过程中产生的物理层或介质访问控制（MAC）层信息，通过建立信号特征与空间坐标之间的映射关系来实现目标定位。
-本节将详细探讨基于 Wi-Fi 信号的两种主流定位表征参数：接收信号强度指示（RSSI）与信道状态信息（CSI）。两者分别从宏观功率与微观频谱特性描述了无线信道的状态。
-
-\subsection{接收信号强度指示（RSSI）}
-\label{subsec:rssi}
-
-接收信号强度指示（Received Signal Strength Indicator, RSSI）是一种由无线通信系统介质访问控制层（MAC Layer）提供的全局性参数，用于刻画接收端天线在给定时刻所观测到的信号功率水平。由于 RSSI 的获取过程不依赖于底层信道的精细结构，其实现方式简单、适用范围广，因此在早期无线定位系统中被广泛采用。
-
-从物理意义上看，RSSI 综合反映了发射功率、传播路径损耗、天线增益以及环境噪声等多种因素的叠加效应。在对数尺度下，其与发射端到接收端之间传播距离的关系通常可由对数距离路径损耗模型近似表示为：
+由于各线阵相机被机械固定在传感器底板上，相机坐标系 $C$ 与传感器坐标系 $S$ 之间存在固定的刚体变换关系。对于任一空间点 $\bm{M}$，其在两坐标系下的描述满足：
 \begin{equation}
-\mathrm{RSSI}(d) = \mathrm{RSSI}_0 - 10 n \log_{10}\!\left( \frac{d}{d_0} \right) + X_\sigma,
+    {}^C \bm{M} = {}^C_S \bm{R} \, {}^S \bm{M} + {}^C_S \bm{t} \label{eq:extrinsic_struct}
 \end{equation}
-其中，$d$ 表示发射端与接收端之间的传播距离，$d_0$ 为参考距离（通常取 $1\,\mathrm{m}$），$\mathrm{RSSI}_0$ 表示在参考距离处测得的接收信号强度，$n$ 为路径损耗指数，用于刻画不同传播环境下信号衰减速率，$X_\sigma$ 为均值为零、方差为 $\sigma^2$ 的随机扰动项，用以描述阴影衰落及测量噪声的影响。
+其中，${}^C_S \bm{R}$ 和 ${}^C_S \bm{t}$ 分别表示传感器中心到各相机光心的旋转矩阵和平移向量。这些参数属于系统的\textbf{结构外参}，在传感器制造完成后即保持恒定。
 
-在理想视距（Line-of-Sight, LOS）条件下，上式表明 RSSI 随传播距离的增加呈现出近似单调递减的趋势。这一特性构成了基于 RSSI 的指纹定位方法及测距型定位算法的物理基础。然而，该模型在复杂室内环境中的适用性往往受到多径传播与环境动态变化的显著制约。
+\subsection{世界坐标系 (World Coordinate System)}
+\label{subsec:world_coords}
 
-在实际应用中，RSSI 的主要局限性源于其特征表达形式的高度简化。首先，RSSI 本质上是多径信号分量在接收端叠加后的总功率标量，无法区分直射路径与反射路径的独立贡献。当接收位置发生微小变化时，不同传播路径之间的相位关系可能发生显著改变，从而引发相长或相消干涉，使 RSSI 出现剧烈波动，即所谓的小尺度衰落现象。其次，RSSI 对环境动态变化较为敏感，人体遮挡、设备姿态变化以及同频无线干扰等因素均可能导致其时间序列呈现明显的非平稳特性。
+世界坐标系 $W$（或惯性坐标系）是系统进行绝对定位的基准参考系。
+在实际应用中，通常选取实验场地中的固定点或高精度测量设备的坐标系作为世界坐标系。
 
-综合而言，RSSI 作为一种低维度、易获取的无线特征，在实现简单定位或区域级感知任务时具有一定实用价值。
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/坐标系S和世界坐标系W之间的关系.pdf}
+    \caption{传感器坐标系与世界坐标系的位姿变换关系}
+    \label{fig:world_transform}
+\end{figure}
 
-\subsection{信道状态信息（CSI）}
-\label{subsec:csi_definition}
-
-相较于基于接收信号强度指示（Received Signal Strength Indicator, RSSI）的定位方法，信道状态信息（Channel State Information, CSI）提供了更加细粒度的物理层特征描述。在 IEEE 802.11n/ac/ax 等现代 Wi-Fi 标准中，正交频分复用（OFDM）与多输入多输出（MIMO）技术的引入，使得商用无线网卡可以在驱动层获取子载波级别的信道频率响应（Channel Frequency Response, CFR），从而为高精度无线感知与定位提供了数据基础。
-
-从系统模型的角度来看，在 OFDM 通信系统中，宽带信道被划分为多个相互正交的窄带子载波。假设系统配置为 $N_t$ 根发射天线与 $N_r$ 根接收天线，则在第 $k$ 个子载波上，接收信号向量 $\mathbf{y}_k$ 与发射信号向量 $\mathbf{x}_k$ 之间可表示为：
+如图 \ref{fig:world_transform} 所示，当LOPS传感器在空间中运动时，传感器坐标系 $S$ 相对于世界坐标系 $W$ 的关系是实时变化的。若已知标记点在世界系下的绝对坐标 ${}^W \bm{M}$，则其在相机系下的坐标可表示为：
 \begin{equation}
-\mathbf{y}_k = \mathbf{H}_k \mathbf{x}_k + \mathbf{n}_k,
-\end{equation}
-其中 $\mathbf{n}_k$ 为加性高斯白噪声向量，$\mathbf{H}_k \in \mathbb{C}^{N_r \times N_t}$ 即为该子载波对应的信道状态信息矩阵。当通信链路退化为单输入单输出（SISO）形式时，$\mathbf{H}_k$ 可简化为一个复数标量：
-\begin{equation}
-H_k = |H_k| e^{j\angle H_k},
-\end{equation}
-其中 $|H_k|$ 与 $\angle H_k$ 分别表示第 $k$ 个子载波的幅度衰减与相位偏移。该复数形式意味着 CSI 不仅反映了信号强度变化，还隐含了传播路径长度、到达时间以及空间角度等关键信息，这是其区别于 RSSI 的核心优势。
-
-从无线传播机理出发，CSI 可以被理解为多径效应在频域中的综合响应。在典型室内环境中，信号从发射端到接收端通常会经历直射路径（LOS）以及多条由墙壁、地面和物体反射或散射形成的非直射路径（NLOS）。根据多径叠加原理，第 $k$ 个子载波上的 CSI 可表示为各条传播路径分量的矢量叠加形式：
-\begin{equation}
-H_k = \sum_{l=1}^{L} \alpha_l(t) e^{-j 2\pi f_k \tau_l},
-\end{equation}
-其中 $L$ 表示有效传播路径数量，$f_k$ 为第 $k$ 个子载波的中心频率，$\alpha_l(t)$ 为第 $l$ 条路径在时刻 $t$ 的复衰减系数（综合了路径损耗与初始相位），$\tau_l$ 则表示对应的传播时延。由于不同路径的时延存在差异，各子载波在频域上表现出不同的幅度起伏与相位旋转，从而形成具有空间唯一性的频率选择性特征。这种特征在目标位置变化时会发生可观测的变化，为基于 CSI 的定位与感知方法提供了物理基础。
-
-在实际室内场景中，环境通常由静态背景结构与动态目标共同构成，相应地，接收到的 CSI 也可视为静态信道分量与动态扰动分量的叠加。当人员或物体在空间中运动时，其引入的反射路径长度将随时间发生变化，从而导致信道相位出现连续演化。若在时刻 $t$ 第 $l$ 条路径的长度变化量为 $\Delta d_l(t)$，则由该动态路径引起的相位变化可近似表示为：
-\begin{equation}
-\Delta \phi_l(t) = \frac{2\pi}{\lambda} \Delta d_l(t),
-\end{equation}
-其中 $\lambda$ 为载波波长。由此可见，CSI 相位随时间的微小波动与物理空间中的距离变化之间存在直接对应关系，使其对人体运动与位置变化高度敏感。
-
-需要指出的是，在商用 Wi-Fi 硬件平台中，直接获取的 CSI 相位往往受到载波频率偏移（Carrier Frequency Offset, CFO）和采样时钟偏移（Sampling Frequency Offset, SFO）等非理想因素的影响，表现为整体随机相位偏置与线性漂移项的叠加。这类硬件引入的相位误差并不来源于真实的物理传播过程，若不加处理将显著削弱 CSI 在定位与感知任务中的有效性。
-
-\subsection{RSSI 与 CSI 参数性能对比}
-
-尽管接收信号强度指示（Received Signal Strength Indicator, RSSI）与信道状态信息（Channel State Information, CSI）均来源于 Wi-Fi 通信过程，但二者在信号提取层级、物理含义及信息表达形式上的本质差异，决定了其在室内定位与无线感知任务中的性能表现存在显著不同。为明确两类特征在定位应用中的适用性，本节从信息粒度、多径分辨能力等方面对 RSSI 与 CSI 进行对比分析。
-
-从信息表达能力的角度来看，RSSI 属于介质访问控制层（MAC Layer）提供的统计量，其本质是对整个信道带宽内接收信号功率的整体度量。该参数通过对频域能量进行平均化处理，将复杂的信道响应压缩为单一标量数值，虽然便于获取与使用，但不可避免地丢失了大量与空间结构相关的频率信息。相比之下，CSI 直接来源于物理层（PHY Layer），能够在子载波尺度上描述无线信道的频率响应特性。在典型的 20 MHz 带宽配置下，基于 IEEE 802.11n 标准的 CSI 可提供 30–56 个子载波的幅度与相位信息，而在 802.11ax/be 等新一代标准中，其频率分辨率进一步提升。这种细粒度的频谱刻画能力使 CSI 能够更充分地反映空间位置变化对信道响应的影响。此外，在多输入多输出（MIMO）系统中，CSI 以矩阵形式同时包含多天线间的耦合关系，天然携带空间维度信息，为到达角（Angle of Arrival, AoA）估计与空间感知算法提供了基础。
-
-在复杂室内环境中，多径效应是制约定位精度的关键因素之一。RSSI 对多径的处理方式本质上是“被动叠加”：直射路径与所有反射路径的信号功率在接收端进行非相干合成，由于不同路径之间相位关系的随机性，极易产生相长或相消干涉现象。这种干涉效应导致 RSSI 在空间上呈现出明显的小尺度衰落特性，即使目标位置发生微小变化，其测量值也可能出现剧烈波动，同时 RSSI 本身无法区分视距（LOS）与非视距（NLOS）传播路径。相比之下，CSI 借助 OFDM 体制对频率选择性衰落的分解能力，能够在频域上刻画不同子载波所经历的多径影响。进一步地，通过对 CSI 进行逆傅里叶变换（IFFT），可在时域中获得信道的功率延迟谱（Power Delay Profile, PDP），从而在一定程度上分离出直射路径与主要反射路径分量。这一特性使得 CSI 在非视距条件下仍能保留具有判别力的空间特征，显著提升了其在复杂环境中的定位鲁棒性。
-
-为更加直观地展示两类参数在关键性能指标上的差异，表 \ref{tab:rssi_csi_comparison} 给出了 RSSI 与 CSI 的对比结果。
-
-\begin{table}[htbp]
-\centering
-\caption{RSSI 与 CSI 性能特征对比}
-\label{tab:rssi_csi_comparison}
-\begin{tabular}{lcc}
-\toprule
-\textbf{对比维度} & \textbf{RSSI} & \textbf{CSI} \\
-\midrule
-网络层级 & MAC 层 & PHY 层 \\
-数据结构 & 单一标量（dBm） & 复数向量/矩阵（幅度 + 相位） \\
-频率分辨率 & 全频段平均功率 & 子载波级细粒度响应 \\
-多径处理能力 & 易受多径叠加影响，难以区分 & 可利用多径特征，具备分离能力 \\
-时间稳定性 & 波动较大，受 AGC 影响明显 & 相对稳定，特征维度丰富 \\
-定位分辨能力 & 空间区分能力有限 & 空间区分能力较强 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-综上分析可知，RSSI 虽然具有获取方式简单、设备通用性强等优势，但其粗粒度特征形式在频率分辨、多径解析及时序稳定性等方面均存在明显局限，难以满足高精度室内定位的需求。相比之下，CSI 能够从物理层对无线信道传播特性进行更为细致的刻画，尤其在多径分辨与空间敏感性方面展现出显著优势。因此，本文后续研究选择以 CSI 作为核心无线特征参数，并在此基础上开展协同定位方法的设计与验证。
-
-\section{CSI 定位相关技术基础}
-\label{sec:csi_foundation}
-
-本节从物理层通信机制的角度，对信道状态信息（Channel State Information, CSI）的产生机理及其技术基础进行说明。CSI 的可获取性依赖于现代 Wi-Fi 标准（IEEE 802.11n/ac/ax）所采用的正交频分复用（OFDM）与多输入多输出（MIMO）技术。OFDM 在频域上对宽带信道进行离散化建模，而 MIMO 在空间维度上扩展了信道的观测自由度，两者的结合使得无线信道能够以多维形式被刻画，从而为基于 CSI 的室内定位提供了基础数据支撑。
-
-\subsection{正交频分复用技术（OFDM）}
-
-正交频分复用（Orthogonal Frequency Division Multiplexing, OFDM）是一种典型的多载波调制技术，其核心思想是将宽带高速数据流映射到一组在频域上相互正交的子载波上进行并行传输。设 OFDM 系统包含 $K$ 个子载波，符号持续时间为 $T$，第 $k$ 个子载波的频率为：
-\begin{equation}
-f_k = f_0 + \frac{k}{T}, \quad k = 0,1,\dots,K-1,
-\end{equation}
-则不同子载波在区间 $[0,T]$ 内满足正交条件：
-\begin{equation}
-\int_{0}^{T} e^{j2\pi f_k t} e^{-j2\pi f_m t} \, dt =
-\begin{cases}
-T, & k = m, \\
-0, & k \neq m.
-\end{cases}
+    {}^C \bm{M} = {}^C_W \bm{R} \, {}^W \bm{M} + {}^C_W \bm{t} \label{eq:world_transform}
 \end{equation}
 
-该正交性保证了接收端能够通过快速傅里叶变换（FFT）在频域中无干扰地分离各子载波信号，从而提高系统的频谱利用效率。
 
-在多径环境下，OFDM 通过引入循环前缀（Cyclic Prefix, CP）有效抑制符号间干扰。当循环前缀长度大于信道的最大时延扩展时，宽带频率选择性衰落信道可被等效分解为一组相互独立的窄带平坦衰落子信道。在此条件下，第 $k$ 个子载波上的接收信号可表示为：
+
+
+\section{基于多线阵CCD的空间点定位原理}
+\label{sec:positioning_principle}
+
+本节旨在建立从多传感器观测数据到三维空间坐标的数学解算模型。首先推导单线阵相机的通用投影模型，明确其内参数与结构外参的耦合关系；随后基于“光平面交会”的几何原理，论证多相机协同定位的必要性，并推导三维坐标的最小二乘解算方法。
+
+\subsection{线阵相机投影模型与参数约束}
+\label{subsec:projection_model}
+
+根据前文 \ref{sec:coordinate_systems} 节定义的坐标变换链，设传感器坐标系 $S$ 中存在一标记点，其坐标为 ${}^S \bm{M} = [X_S \quad Y_S \quad Z_S]^T$。我们的目标是建立该三维坐标与像素坐标系 $P$ 中观测值 $u$ 之间的直接映射函数。
+
+根据成像几何关系，点 ${}^S \bm{M}$ 首先需经由刚体变换映射至相机坐标系 $C$（公式 \ref{eq:extrinsic_struct}），随即通过透视投影离散化为像素坐标（公式 \ref{eq:intrinsic_matrix}）。引入尺度因子 $s$（物理意义为点在相机坐标系下的深度 $Z_C$），联立上述变换过程，可得：
+
 \begin{equation}
-Y_k = H_k X_k + N_k,
+    s \begin{bmatrix} u \\ 1 \end{bmatrix} = 
+    \underbrace{ \begin{bmatrix} f & 0 & u_0 \\ 0 & 0 & 1 \end{bmatrix} }_{\text{内参矩阵}}
+    \underbrace{ \begin{bmatrix} {}^C_S \bm{R} & {}^C_S \bm{t} \end{bmatrix} }_{\text{结构外参矩阵}}
+    \begin{bmatrix} {}^S \bm{M} \\ 1 \end{bmatrix}
+    \label{eq:combined_mapping}
 \end{equation}
-其中 $X_k$ 与 $Y_k$ 分别为发射与接收符号，$N_k$ 为加性高斯白噪声，$H_k$ 为对应子载波的信道频率响应系数。
 
-从定位角度看，$\{H_k\}$ 构成了无线信道在频域上的离散采样结果，其复数幅度与相位共同反映了多径传播条件下不同频率分量的衰落特性。这一子载波级信道响应集合正是 CSI 在 OFDM 系统中的物理本质。
+由于内参矩阵与结构外参矩阵均为常数矩阵，可将其乘积合并为一个 $2 \times 4$ 的映射矩阵。整理公式 (\ref{eq:combined_mapping}) 可得基于传感器坐标系的通用投影模型：
 
-\subsection{多输入多输出技术（MIMO）}
-
-多输入多输出（Multiple-Input Multiple-Output, MIMO）技术通过在发射端和接收端分别部署多根天线，利用无线信道在空间维度上的独立性来增强系统性能。对于一个具有 $N_t$ 个发射天线和 $N_r$ 个接收天线的系统，在第 $k$ 个子载波上，其信道模型可表示为：
 \begin{equation}
-\mathbf{y}_k = \mathbf{H}_k \mathbf{x}_k + \mathbf{n}_k,
+    s \begin{bmatrix} u \\ 1 \end{bmatrix} = \bm{L} \begin{bmatrix} {}^S \bm{M} \\ 1 \end{bmatrix} = 
+    \begin{bmatrix} l_1 & l_2 & l_3 & l_4 \\ l_5 & l_6 & l_7 & 1 \end{bmatrix}
+    \begin{bmatrix} X_S \\ Y_S \\ Z_S \\ 1 \end{bmatrix}
+    \label{eq:projection_matrix_def}
 \end{equation}
-其中 $\mathbf{H}_k \in \mathbb{C}^{N_r \times N_t}$ 为子载波 $k$ 上的 MIMO 信道矩阵，$\mathbf{x}_k$ 和 $\mathbf{y}_k$ 分别表示发射与接收信号向量。
 
-结合 OFDM 体制后，CSI 在整体上可表示为一个三维数据结构：
+其中，$\bm{L}$ 定义为线阵相机的\textbf{全局投影矩阵}（Projection Matrix）。
+
+\textbf{参数约束分析：}
+由公式 (\ref{eq:projection_matrix_def}) 可知，投影矩阵 $\bm{L}$ 将相机的内部光学特性（焦距 $f$、主点 $u_0$）与系统级的机械结构参数（旋转 ${}^C_S \bm{R}$、平移 ${}^C_S \bm{t}$）进行了耦合。
+在LOPS系统中，各线阵相机相对于传感器基座的安装位置是刚性固定的，即坐标系变换关系恒定。因此，对于系统中的每一个相机通道，矩阵 $\bm{L}$ 中的 7个元素 ($l_1 \sim l_7$) 均为系统固有常数。
+这7个参数完备地描述了该相机在传感器体系下的空间观测特性。第三章将详细阐述如何通过标定实验解算这些参数。
+
+\subsection{多线阵空间交会定位原理}
+\label{subsec:intersection_principle}
+
+\subsubsection{光平面几何约束}
+与面阵相机将空间点投影为一条射线不同，线阵相机的一维观测特性在几何上具有特殊的降维性质。将公式 (\ref{eq:projection_matrix_def}) 展开并消去尺度因子 $s$（即 $s = l_5 X_S + l_6 Y_S + l_7 Z_S + 1$），可得：
 \begin{equation}
-\mathcal{H} = \left\{ \mathbf{H}_k \right\}_{k=1}^{K},
+    u (l_5 X_S + l_6 Y_S + l_7 Z_S + 1) = l_1 X_S + l_2 Y_S + l_3 Z_S + l_4
 \end{equation}
-其维度由子载波数量、发射天线数量以及接收天线数量共同决定。与单天线系统相比，多天线配置显著增加了可观测的独立信道链路数量，使得无线信道在空间维度上的差异性能够被更充分地表征。
+整理同类项，得到关于空间坐标 $(X_S, Y_S, Z_S)$ 的线性方程：
+\begin{equation}
+    (l_1 - u l_5) X_S + (l_2 - u l_6) Y_S + (l_3 - u l_7) Z_S + (l_4 - u) = 0
+    \label{eq:light_plane_equation}
+\end{equation}
+公式 (\ref{eq:light_plane_equation}) 的几何意义十分明确：它描述了一个通过相机光心与成像直线的平面，本文称之为\textbf{“光平面” (Light Plane)} 。这意味着，单台线阵相机的观测值 $u$ 仅能约束目标点位于该特定的光平面上，而无法确定其具体深度。
 
-从空间感知的角度来看，不同接收天线之间的相位差与幅度差隐含了与信号到达方向及空间几何结构相关的信息；同时，多链路联合观测也增强了 CSI 在不同空间位置下的区分能力，有利于构建更具判别性的定位特征。
+\subsubsection{多平面交会与自由度分析}
+为了唯一确定空间点的三维坐标（3个自由度），必须引入足够的几何约束。
+\begin{itemize}
+    \item \textbf{双相机观测：} 若引入第二个线阵相机，目标点将被约束在两个光平面的交线上（假设两相机光轴不共面）。此时系统仍存在1个自由度冗余，仅能测向，无法测距。
+    \item \textbf{三相机观测：} 根据立体几何原理，三个互不平行的平面的交集（在非奇异构型下）为一个点。因此，至少需要三个非共轴线阵相机的协同观测，通过三个光平面的交汇，方可实现精确的三维定位。
+\end{itemize}
 
-\subsection{OFDM 与 MIMO 的协同作用}
+\subsubsection{Y型构型优势与解算}
+图 \ref{fig:tradition_Mulit_CCD} 展示了现有的两种典型多线阵布局：正交立体结构（文献[47]）和分布式测量网络（文献[49]）。正交结构虽然数学模型简单，但往往导致传感器体积庞大；分布式布局虽然灵活，但需要复杂的多节点外参标定，且依赖特定的场景部署。
 
-综合而言，OFDM 通过将宽带信道离散化为子载波级响应，在频域上细化了信道的描述方式；MIMO 则通过多天线结构在空间维度上扩展了信道的观测自由度。二者的协同作用使 CSI 能够从频率与空间两个维度对无线传播环境进行刻画，从而为后续基于 CSI 的室内定位与感知方法提供必要的物理与数学基础。
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/传统线阵CCD布局.pdf}
+    \caption{传统线阵CCD布局形式：(a) 正交立体结构；(b) 分布式测量网络}
+    \label{fig:tradition_Mulit_CCD}
+\end{figure}
+
+针对上述局限，本文提出了图 \ref{fig:Y_Mulit_CCD} 所示的紧凑型 Y 型共面结构。该构型在同一平面内集成三个互成 $120^\circ$ 夹角的线阵相机，既保证了三个光平面在空间中具备良好的交会角（Geometric Dilution of Precision, GDOP），又显著降低了传感器体积，实现了便携性与测量稳定性的平衡。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.6\textwidth]{figures/chap04/Y型定位传感器模型.pdf}
+    \caption{本文提出的Y型定位传感器光平面交会原理}
+    \label{fig:Y_Mulit_CCD}
+\end{figure}
+
+当系统的三个相机 ($i=1, 2, 3$) 同时观测到同一目标时，基于公式 (\ref{eq:light_plane_equation}) 可构建如下线性方程组：
+\begin{equation}
+    \begin{cases}
+        (l_{1,1} - u_1 l_{1,5}) X_S + (l_{1,2} - u_1 l_{1,6}) Y_S + (l_{1,3} - u_1 l_{1,7}) Z_S = u_1 - l_{1,4} \\
+        (l_{2,1} - u_2 l_{2,5}) X_S + (l_{2,2} - u_2 l_{2,6}) Y_S + (l_{2,3} - u_2 l_{2,7}) Z_S = u_2 - l_{2,4} \\
+        (l_{3,1} - u_3 l_{3,5}) X_S + (l_{3,2} - u_3 l_{3,6}) Y_S + (l_{3,3} - u_3 l_{3,7}) Z_S = u_3 - l_{3,4}
+    \end{cases}
+\end{equation}
+写成矩阵形式为：
+\begin{equation}
+    \bm{A} {}^S \bm{M} = \bm{b}
+    \label{eq:linear_system}
+\end{equation}
+其中系数矩阵 $\bm{A} \in \mathbb{R}^{3 \times 3}$ 和常数向量 $\bm{b} \in \mathbb{R}^{3 \times 1}$ 由各相机的投影参数 $l_{i,j}$ 及其实时观测值 $u_i$ 构造。
+若 $\bm{A}$ 满秩（即三个光平面不共线），则通过 $\bm{M} = \bm{A}^{-1} \bm{b}$ 即可解算出目标在传感器坐标系下的精确三维坐标。在实际工程中，常采用最小二乘法或奇异值分解（SVD）求解以提高数值稳定性。
 
 
 
 
-
-
-
-
-
-
-% \section{分布式感知系统硬件架构与网络拓扑}
-% \label{sec:hardware_architecture}
-
-% 为了验证本文提出的协同室内定位算法，我们搭建了一套基于商用WiFi设备的分布式感知系统。该系统旨在通过低成本、易部署的单天线节点，构建覆盖目标区域的射频感知网络。
-
-% \subsection{硬件选型与空间布局}
-
-% 本系统选用 **ESP32-S3** 开发板作为基础感知节点。ESP32-S3 是一款集成 2.4GHz Wi-Fi 和蓝牙 5 (LE) 的高性能 SoC，其内置的底层驱动支持从物理层直接提取信道状态信息（CSI），且成本低廉，适合大规模分布式部署。
-
-% 感知区域被定义为一个 $2.5\text{m} \times 2.5\text{m} \times 2.5\text{m}$ 的无遮挡（Line-of-Sight, LoS）长方体空间。为了实现全方位的多视角感知，系统共部署了 8 个 ESP32-S3 节点作为接收端（Station, STA），以及 1 个路由器作为发射端（Access Point, AP）。具体的空间布局如下：
-
-% \begin{itemize}
-%     \item \textbf{发射端（AP）}：放置于立方体空间底面的几何中心，负责持续发送全向 Wi-Fi 探测包。
-%     \item \textbf{接收端（STA）}：8 个感知节点均匀分布在立方体空间的四个侧面外围。每个侧面布置 2 个节点，节点离地高度统一设置为 $0.7\text{m}$，同一侧面的两个节点间距为 $1\text{m}$。
-% \end{itemize}
-
-% 这种“中心激励-四周接收”的拓扑结构形成了密集的射频链路网络，确保了目标在区域内任何位置移动时，都能切割足够多的菲涅尔区（Fresnel Zone），从而引发可观测的信号波动。
-
-% \begin{figure}[htbp]
-%     \centering
-%     % \includegraphics[width=0.8\textwidth]{figures/system_layout.png} 
-%     % 请在此处插入你的系统布局示意图
-%     \caption{分布式8节点感知系统空间布局示意图}
-%     \label{fig:system_layout}
-% \end{figure}
-
-% \subsection{数据传输与时钟同步机制}
-
-% 系统工作在 2.4GHz ISM 频段。为了捕捉细微的动作特征，接收端 CSI 的采样频率（Sampling Rate）设定为 **120Hz**。底层驱动基于 **ESP32-CSI-Tool** 框架开发，该工具能够解析 IEEE 802.11n 协议下的物理层前导码，提取包含幅度和相位的原始 CSI 复数矩阵。
-
-% 在数据回传链路中，所有 ESP32-S3 节点与一台高性能 PC 主机处于同一局域网（LAN）内。节点将提取到的 CSI 数据包封装后，通过 **UDP 协议** 实时流式传输至 PC 服务器端进行记录与处理。
-
-% 鉴于分布式系统各节点独立运行，为了实现多节点数据的时域对齐，本系统引入了 **SNTP（Simple Network Time Protocol）** 协议。
-% \begin{enumerate}
-%     \item 系统启动时，所有 ESP32-S3 节点首先通过网络连接至 NTP 服务器，同步世界协调时间（UTC）。
-%     \item 在数据采集过程中，每个 CSI 数据包在产生瞬间均被打上微秒级的时间戳。
-%     \item 服务器端依据时间戳对来自 8 个不同数据流的 CSI 帧进行重排序与对齐，消除了网络传输延迟带来的时序抖动。
-% \end{enumerate}
-
+\section{本章小结}
+本章首先阐述了线阵相机的成像机理及光斑中心亚像素定位算法，随后定义了系统涉及的各类坐标系。在此基础上，重点推导了基于投影矩阵 $\bm{L}$ 的正向成像模型，明确了投影矩阵中7个固定参数的物理意义，并分析了基于多光平面交会的空间定位原理。这为后续章节开展系统参数标定与高精度定位实验奠定了坚实的理论基础。
